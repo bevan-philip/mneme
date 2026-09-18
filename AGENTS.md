@@ -78,3 +78,45 @@
   indent) and their children level 2. Worth keeping since a review bot
   once modeled this backwards — trust this test over a re-derivation from
   reading the rslib source.
+- `cards.rs` edits notes, not cards: a card is a (note, template) pairing
+  rslib generates and re-generates on its own (`Collection::update_note`
+  already regenerates/removes cards for e.g. cloze edits), and its only
+  independently editable content is the note's fields. `cards edit` takes
+  a card id purely as the ergonomic handle a user has (from `cards list`
+  or Anki's own browser) and resolves it to the underlying note; editing
+  one card of a multi-template note (e.g. "Basic (and reversed card)")
+  edits all of that note's cards, same as Anki's own editor.
+- The `show`/`edit`/`add --input` file format (`render_note_file` /
+  `parse_note_file` in `cards.rs`) is a plain-text, Markdown-flavoured
+  serialization of a note chosen so field HTML round-trips through a text
+  editor: a `# notetype:`/`# tags:` header for context, then one
+  `## FieldName` section per field holding that field's raw content
+  verbatim. Fields are matched by exact name and notetype order (not
+  reordered by name) so a misspelled field name is a hard error instead of
+  silently landing in the wrong slot.
+- Two details make that round-trip exact rather than approximate, both
+  covered by tests: (1) a field body line starting with `## ` (or `\`)
+  would otherwise be misread as the next section boundary, so
+  `escape_field`/`unescape_field_line` backslash-escape it on the way out
+  and back; (2) the boundary `render_note_file` writes after each value is
+  a *fixed* two newlines regardless of what the value itself ends with, so
+  `trim_field` can strip exactly that much back off instead of
+  `trim_end_matches('\n')`-ing away trailing newlines that were actually
+  part of the field's own content.
+- `cards add`/`cards edit` don't auto-create the deck or notetype named on
+  the command line: `Note::new`/`add_note` would happily proceed with
+  whatever's found, but a typo'd `--deck`/`--notetype` silently landing in
+  the wrong place (or creating a stray deck) is worse than an error naming
+  `decks list` as the way to check what exists.
+- `cards list`'s tab-separated output sanitizes every column (deck name,
+  notetype name, question preview) by replacing literal tabs with spaces —
+  otherwise a field containing a tab produces a row with more than four
+  columns, breaking anything parsing the listing.
+- `parse_note_file` deliberately still uses plain `str::lines()` (which
+  folds a `\r` immediately before `\n` into the terminator and drops it)
+  rather than a CRLF-preserving split: rslib's own field normalization
+  (`notes::invalid_char_for_field`) strips every ASCII control character
+  except `\n`/`\t` on every `add_note`/`update_note` regardless, so a
+  stored field can never actually contain a `\r` to lose. Pinned by
+  `rslib_normalizes_carriage_returns_out_of_fields` in `cards.rs` — don't
+  "fix" the line-splitting here to chase a CRLF that can't reach storage.

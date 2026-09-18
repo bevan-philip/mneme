@@ -1,4 +1,5 @@
 mod backup;
+mod cards;
 mod cli;
 mod decks;
 mod paths;
@@ -9,6 +10,7 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::Parser;
 
+use cli::CardsCommand;
 use cli::Cli;
 use cli::Command;
 use cli::DecksCommand;
@@ -57,8 +59,67 @@ fn main() -> Result<()> {
             let mut col = store::open_collection(&collection_path).map_err(open_error_to_anyhow)?;
             print!("{}", decks::list_decks(&mut col)?);
         }
+        Command::Cards { command } => {
+            let profile_name = profile::resolve_profile(&anki2_root, requested_profile)?;
+            let collection_path = paths::collection_path(&anki2_root, &profile_name);
+            let mut col = store::open_collection(&collection_path).map_err(open_error_to_anyhow)?;
+            run_cards_command(&mut col, command)?;
+        }
     }
 
+    Ok(())
+}
+
+fn run_cards_command(col: &mut anki::collection::Collection, command: CardsCommand) -> Result<()> {
+    match command {
+        CardsCommand::List { search } => {
+            let listing = cards::list_cards(col, search.as_deref().unwrap_or(""))?;
+            print!("{listing}");
+        }
+        CardsCommand::Show { card_id, output } => {
+            let text = cards::show(col, card_id)?;
+            match output {
+                Some(path) => {
+                    std::fs::write(&path, &text)
+                        .with_context(|| format!("failed to write {}", path.display()))?;
+                    println!("wrote {}", path.display());
+                }
+                None => print!("{text}"),
+            }
+        }
+        CardsCommand::Edit { card_id, input } => {
+            let text = std::fs::read_to_string(&input)
+                .with_context(|| format!("failed to read {}", input.display()))?;
+            cards::edit(col, card_id, &text)?;
+            println!("updated card {card_id}");
+        }
+        CardsCommand::Add {
+            notetype,
+            deck,
+            fields,
+            input,
+        } => {
+            let (fields, tags) = if let Some(path) = input {
+                let text = std::fs::read_to_string(&path)
+                    .with_context(|| format!("failed to read {}", path.display()))?;
+                let (file_notetype, tags, fields) = cards::parse_note_file_for_add(&text)?;
+                if let Some(file_notetype) = file_notetype
+                    && file_notetype != notetype
+                {
+                    anyhow::bail!(
+                        "file is for notetype `{file_notetype}`, but --notetype was `{notetype}`"
+                    );
+                }
+                (fields, tags)
+            } else if !fields.is_empty() {
+                (cards::parse_field_args(&fields)?, Vec::new())
+            } else {
+                anyhow::bail!("provide either --field NAME=VALUE or --input FILE");
+            };
+            let (note_id, card_count) = cards::add(col, &notetype, &deck, &fields, &tags)?;
+            println!("added note {note_id} ({card_count} card(s))");
+        }
+    }
     Ok(())
 }
 
