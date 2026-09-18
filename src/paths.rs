@@ -17,6 +17,16 @@ pub fn collection_path(anki2_root: &Path, profile: &OsStr) -> PathBuf {
     anki2_root.join(profile).join("collection.anki2")
 }
 
+/// Whether `name` is exactly one normal path component: no separators, and
+/// not `.`, `..`, or absolute. `--profile` is documented as a profile name,
+/// not a path, so anything else (`../elsewhere`, an absolute path) should
+/// be rejected rather than silently escaping `anki2_root` once joined.
+pub fn is_profile_name(name: &OsStr) -> bool {
+    let mut components = Path::new(name).components();
+    matches!(components.next(), Some(std::path::Component::Normal(_)))
+        && components.next().is_none()
+}
+
 /// A short, stable fingerprint (FNV-1a) of a path's on-disk byte
 /// representation. Used to tell apart same-named profiles under different
 /// `--anki2-root`s without depending on the path already existing on disk.
@@ -55,13 +65,28 @@ pub fn fingerprint(path: &Path) -> String {
     format!("{hash:016x}")
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
+    fn accepts_plain_profile_names() {
+        assert!(is_profile_name(OsStr::new("User 1")));
+        assert!(is_profile_name(OsStr::new("Test-User_2")));
+    }
+
+    #[test]
+    fn rejects_anything_that_isnt_one_normal_component() {
+        assert!(!is_profile_name(OsStr::new("..")));
+        assert!(!is_profile_name(OsStr::new(".")));
+        assert!(!is_profile_name(OsStr::new("../outside")));
+        assert!(!is_profile_name(OsStr::new("a/b")));
+        assert!(!is_profile_name(OsStr::new("/etc")));
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn distinct_non_utf8_paths_have_distinct_fingerprints() {
-        use std::ffi::OsStr;
         use std::os::unix::ffi::OsStrExt;
 
         // Both invalid UTF-8, and both collapse to the same string under

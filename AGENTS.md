@@ -60,3 +60,9 @@
   check a typo'd `--profile` would silently create and operate on a
   fresh, empty collection — exactly the "arbitrary database" behavior
   README says this CLI isn't for.
+- `resolve_profile` also rejects an explicit `--profile` that isn't
+  exactly one normal path component (`paths::is_profile_name`): it's a
+  `PathBuf` on the `Cli` struct for lossless non-UTF-8 handling, but it's
+  documented as a profile *name*, and joining an unvalidated one onto
+  `anki2_root` would let `../elsewhere` or an absolute value silently
+  target a collection outside the selected root.
