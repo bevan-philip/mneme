@@ -78,3 +78,24 @@
   indent) and their children level 2. Worth keeping since a review bot
   once modeled this backwards — trust this test over a re-derivation from
   reading the rslib source.
+- `cards.rs` edits notes, not cards: a card is a (note, template) pairing
+  rslib generates and re-generates on its own (`Collection::update_note`
+  already regenerates/removes cards for e.g. cloze edits), and its only
+  independently editable content is the note's fields. `cards edit` takes
+  a card id purely as the ergonomic handle a user has (from `cards list`
+  or Anki's own browser) and resolves it to the underlying note; editing
+  one card of a multi-template note (e.g. "Basic (and reversed card)")
+  edits all of that note's cards, same as Anki's own editor.
+- The `show`/`edit`/`add --input` file format (`render_note_file` /
+  `parse_note_file` in `cards.rs`) is a plain-text, Markdown-flavoured
+  serialization of a note chosen so field HTML round-trips through a text
+  editor: a `# notetype:`/`# tags:` header for context, then one
+  `## FieldName` section per field holding that field's raw content
+  verbatim. Fields are matched by exact name and notetype order (not
+  reordered by name) so a misspelled field name is a hard error instead of
+  silently landing in the wrong slot.
+- `cards add`/`cards edit` don't auto-create the deck or notetype named on
+  the command line: `Note::new`/`add_note` would happily proceed with
+  whatever's found, but a typo'd `--deck`/`--notetype` silently landing in
+  the wrong place (or creating a stray deck) is worse than an error naming
+  `decks list` as the way to check what exists.
