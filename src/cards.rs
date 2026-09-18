@@ -160,14 +160,19 @@ fn render_note_file(note: &Note, notetype: &Notetype) -> String {
     out
 }
 
+/// The line that separates notes in a multi-note `--input` file (see
+/// `parse_note_files_for_add`). Chosen to not collide with the existing
+/// `# notetype:`/`## FieldName` header syntax.
+const NOTE_DELIMITER: &str = "---";
+
 /// Escape a line that would otherwise be misread as a `## FieldName`
-/// section boundary, or as an escaped line, when the field's raw content
-/// contains it verbatim.
+/// section boundary, a note delimiter, or as an escaped line, when the
+/// field's raw content contains it verbatim.
 fn escape_field(value: &str) -> String {
     value
         .split('\n')
         .map(|line| {
-            if line.starts_with('\\') || line.starts_with("## ") {
+            if line.starts_with('\\') || line.starts_with("## ") || line == NOTE_DELIMITER {
                 format!("\\{line}")
             } else {
                 line.to_string()
@@ -287,19 +292,130 @@ fn set_fields(note: &mut Note, notetype: &Notetype, fields: &[(String, String)])
     Ok(())
 }
 
-/// Parse a note file (see `show`/`render_note_file`) for `cards add
-/// --input`: returns its optional notetype header (for the caller to
-/// cross-check against `--notetype`), its tags, and its fields.
+/// Split a `--input` file into one chunk per note, on a line that's
+/// exactly `NOTE_DELIMITER` *and* immediately preceded by a blank line (or
+/// is the first line of the file) — the same position every `## ` section
+/// header occupies, per `render_note_file`'s fixed two-newline field
+/// boundary. `escape_field` unconditionally escapes a field body line
+/// that's exactly `---` (regardless of what surrounds it), so a file dumped
+/// after this delimiter existed is never ambiguous. But a file dumped
+/// *before* it existed could contain a legitimate, unescaped `---` line as
+/// part of a field's own content; requiring the blank line keeps such a
+/// line, so long as it isn't already isolated as its own paragraph, from
+/// being misread as a note boundary instead of being preserved as content.
+/// A file with no recognized delimiter line at all is just one chunk (the
+/// whole file), so single-note files parse exactly as before.
+fn split_note_blocks(text: &str) -> Vec<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut blocks = Vec::new();
+    let mut current = String::new();
+    for (i, &line) in lines.iter().enumerate() {
+        let preceded_by_blank_or_start = i == 0 || lines[i - 1].trim().is_empty();
+        if line == NOTE_DELIMITER && preceded_by_blank_or_start {
+            blocks.push(current);
+            current = String::new();
+        } else {
+            current.push_str(line);
+            current.push('\n');
+        }
+    }
+    blocks.push(current);
+    blocks
+}
+
+/// Parse a `--input` file (see `show`/`render_note_file`) holding one or
+/// more notes for `cards add`: returns, per note, its optional notetype
+/// header (for the caller to cross-check against `--notetype`), its tags,
+/// and its fields. Errors (rather than silently returning zero notes) if
+/// the file has no notes at all, e.g. it's empty or whitespace-only —
+/// `parse_note_file` already refused that for the single-note case, and an
+/// empty batch silently "succeeding" would hide a bad file the same way
+/// aborting a batch partway through would.
 #[allow(clippy::type_complexity)]
-pub fn parse_note_file_for_add(
+pub fn parse_note_files_for_add(
     text: &str,
-) -> Result<(Option<String>, Vec<String>, Vec<(String, String)>)> {
-    let parsed = parse_note_file(text)?;
-    Ok((
-        parsed.notetype,
-        parsed.tags.unwrap_or_default(),
-        parsed.fields,
-    ))
+) -> Result<Vec<(Option<String>, Vec<String>, Vec<(String, String)>)>> {
+    let blocks: Vec<String> = split_note_blocks(text)
+        .into_iter()
+        .filter(|block| !block.trim().is_empty())
+        .collect();
+    if blocks.is_empty() {
+        bail!("no `## FieldName` sections found");
+    }
+    blocks
+        .into_iter()
+        .map(|block| {
+            let parsed = parse_note_file(&block)?;
+            Ok((
+                parsed.notetype,
+                parsed.tags.unwrap_or_default(),
+                parsed.fields,
+            ))
+        })
+        .collect()
+}
+
+/// The outcome of adding one note from a `cards add --input` batch.
+#[derive(Debug)]
+pub enum NoteOutcome {
+    Added { note_id: i64, card_count: usize },
+    Failed { error: String },
+}
+
+/// Add every note in `parsed_notes` (as produced by
+/// `parse_note_files_for_add`) to `deck_name`, all under `notetype_name`.
+///
+/// Every note's fields are validated against the notetype's own fields
+/// (and, if present, its `# notetype:` header against `notetype_name`)
+/// before anything is added to the collection: a typo'd field name or a
+/// mismatched header fails the whole batch, adding none of it, the same
+/// typo-safety guarantee single-note `add` already gives. Past that point
+/// each note is added independently and its own success or failure (e.g. a
+/// Cloze note missing its cloze deletion, which rslib only rejects at
+/// add-time) is reported without blocking the rest of the batch.
+#[allow(clippy::type_complexity)]
+pub fn add_many(
+    col: &mut Collection,
+    notetype_name: &str,
+    deck_name: &str,
+    parsed_notes: &[(Option<String>, Vec<String>, Vec<(String, String)>)],
+) -> Result<Vec<NoteOutcome>> {
+    let notetype = col
+        .get_notetype_by_name(notetype_name)?
+        .with_context(|| format!("no such notetype: {notetype_name}"))?;
+    let deck_id = col
+        .get_deck_id(deck_name)?
+        .with_context(|| format!("no such deck: {deck_name} (see `decks list`)"))?;
+
+    let mut prepared = Vec::with_capacity(parsed_notes.len());
+    for (idx, (file_notetype, tags, fields)) in parsed_notes.iter().enumerate() {
+        if let Some(file_notetype) = file_notetype
+            && file_notetype != notetype_name
+        {
+            bail!(
+                "note {}: file is for notetype `{file_notetype}`, but --notetype was `{notetype_name}`",
+                idx + 1
+            );
+        }
+        let mut note = Note::new(&notetype);
+        set_fields(&mut note, &notetype, fields).with_context(|| format!("note {}", idx + 1))?;
+        note.tags = tags.clone();
+        prepared.push(note);
+    }
+
+    let mut outcomes = Vec::with_capacity(prepared.len());
+    for mut note in prepared {
+        match col.add_note(&mut note, deck_id) {
+            Ok(output) => outcomes.push(NoteOutcome::Added {
+                note_id: note.id.0,
+                card_count: output.output,
+            }),
+            Err(err) => outcomes.push(NoteOutcome::Failed {
+                error: err.to_string(),
+            }),
+        }
+    }
+    Ok(outcomes)
 }
 
 /// Parse repeated `--field NAME=VALUE` arguments into ordered pairs.
@@ -449,6 +565,114 @@ mod tests {
         let fields = vec![("Front".to_string(), "only one field".to_string())];
         let err = add(&mut col, &notetype, &deck, &fields, &[]).unwrap_err();
         assert!(err.to_string().contains("don't match notetype"));
+    }
+
+    #[test]
+    fn parses_multiple_notes_separated_by_delimiter() {
+        let text = "## Front\nhola\n\n## Back\nhello\n\n---\n## Front\nadios\n\n## Back\nbye\n";
+        let parsed = parse_note_files_for_add(text).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(
+            parsed[0].2,
+            vec![
+                ("Front".to_string(), "hola".to_string()),
+                ("Back".to_string(), "hello".to_string()),
+            ]
+        );
+        assert_eq!(
+            parsed[1].2,
+            vec![
+                ("Front".to_string(), "adios".to_string()),
+                ("Back".to_string(), "bye".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn single_note_file_without_delimiter_still_parses_as_one_note() {
+        let text = "# notetype: Basic\n\n## Front\nhola\n\n## Back\nhello\n";
+        let parsed = parse_note_files_for_add(text).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].0.as_deref(), Some("Basic"));
+    }
+
+    #[test]
+    fn rejects_an_empty_input_file() {
+        let err = parse_note_files_for_add("").unwrap_err();
+        assert!(err.to_string().contains("no `## FieldName` sections found"));
+
+        let err = parse_note_files_for_add("   \n\n  \n").unwrap_err();
+        assert!(err.to_string().contains("no `## FieldName` sections found"));
+    }
+
+    #[test]
+    fn a_delimiter_line_not_preceded_by_a_blank_line_is_kept_as_field_content() {
+        // Simulates a file dumped by a `cards show` from before this
+        // delimiter existed, where a field's own `---` line was never
+        // escaped: since it isn't isolated on its own blank-preceded line,
+        // it must be read back as ordinary content, not a note boundary.
+        let text = "## Front\nQ\n\n## Back\nline1\n---\nline2\n";
+        let parsed = parse_note_files_for_add(text).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].2[1].1, "line1\n---\nline2");
+    }
+
+    #[test]
+    fn field_value_containing_the_delimiter_round_trips() {
+        let mut col = CollectionBuilder::default().build().unwrap();
+        let (deck, notetype) = basic_deck_and_notetype(&mut col);
+        let fields = vec![
+            ("Front".to_string(), "Q".to_string()),
+            ("Back".to_string(), "before\n---\nafter".to_string()),
+        ];
+        let (_note_id, _) = add(&mut col, &notetype, &deck, &fields, &[]).unwrap();
+
+        let card_id = col
+            .search_cards("", SortMode::NoOrder)
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        let dumped = show(&mut col, card_id.0).unwrap();
+
+        // A dumped field body line matching the note delimiter must have
+        // been escaped, or a multi-note parse would misread it as a
+        // boundary.
+        let parsed = parse_note_files_for_add(&dumped).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].2[1].1, "before\n---\nafter");
+    }
+
+    #[test]
+    fn batch_with_one_invalid_notetype_header_fails_without_adding_any() {
+        let mut col = CollectionBuilder::default().build().unwrap();
+        let (deck, notetype) = basic_deck_and_notetype(&mut col);
+
+        let text = "## Front\nhola\n\n## Back\nhello\n\n---\n# notetype: NoSuchNotetype\n\n## Front\nadios\n\n## Back\nbye\n";
+        let parsed = parse_note_files_for_add(text).unwrap();
+        let err = add_many(&mut col, &notetype, &deck, &parsed).unwrap_err();
+        assert!(err.to_string().contains("note 2"));
+
+        let remaining = col.search_cards("", SortMode::NoOrder).unwrap();
+        assert!(remaining.is_empty());
+    }
+
+    #[test]
+    fn adds_a_batch_of_notes_and_reports_each_ones_id() {
+        let mut col = CollectionBuilder::default().build().unwrap();
+        let (deck, notetype) = basic_deck_and_notetype(&mut col);
+
+        let text = "## Front\nhola\n\n## Back\nhello\n\n---\n## Front\nadios\n\n## Back\nbye\n";
+        let parsed = parse_note_files_for_add(text).unwrap();
+        let outcomes = add_many(&mut col, &notetype, &deck, &parsed).unwrap();
+
+        assert_eq!(outcomes.len(), 2);
+        for outcome in &outcomes {
+            assert!(matches!(outcome, NoteOutcome::Added { card_count: 1, .. }));
+        }
+
+        let remaining = col.search_cards("", SortMode::NoOrder).unwrap();
+        assert_eq!(remaining.len(), 2);
     }
 
     #[test]

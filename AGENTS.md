@@ -120,3 +120,62 @@
   stored field can never actually contain a `\r` to lose. Pinned by
   `rslib_normalizes_carriage_returns_out_of_fields` in `cards.rs` — don't
   "fix" the line-splitting here to chase a CRLF that can't reach storage.
+- `cards add --input` accepts a file holding several notes, separated by a
+  line containing exactly `---` (`NOTE_DELIMITER`/`split_note_blocks` in
+  `cards.rs`); a file with no such line is still just one note, so this is
+  fully backward compatible with `cards show`'s single-note output. `---`
+  was picked because it can't collide with the `# notetype:`/`## FieldName`
+  header syntax; `escape_field` now also backslash-escapes a field body
+  line that's exactly `---`, the same way it already escapes `## `-prefixed
+  lines, so that content round-trips through `show`/multi-note `add`
+  unchanged.
+- That escaping only protects notes dumped *after* the delimiter existed.
+  A note file dumped by an older `cards show` could have an unescaped
+  `---` sitting in a field's own content, so `split_note_blocks` only
+  treats a `---` line as a boundary when it's immediately preceded by a
+  blank line (or is the file's first line) — the same position every `## `
+  header occupies. That doesn't make the delimiter unambiguous (a `---`
+  that was already isolated on its own paragraph in old prose is
+  indistinguishable from a deliberate separator, and can't be made so
+  without a different, uglier delimiter), but it does mean a `---` that's
+  merely part of a running line of text — the common case — round-trips as
+  content instead of silently truncating the field at that point. Pinned
+  by `a_delimiter_line_not_preceded_by_a_blank_line_is_kept_as_field_content`
+  in `cards.rs`.
+- `parse_note_files_for_add` errors on an input file with zero notes in it
+  (empty, whitespace-only, or every block within it blank) instead of
+  quietly returning `Ok(vec![])`: `parse_note_file` already refused this
+  for the single-note case ("no `## FieldName` sections found"), and
+  `cards::add_many` iterating zero notes would otherwise print nothing and
+  exit 0 for what's almost always a bad file, not an intentional no-op.
+- `cards::add_many` validates every note in a multi-note batch (its
+  `# notetype:` header against `--notetype`, its fields against the
+  notetype's own field names) *before* adding any of them: this is the same
+  typo-safety guarantee single-note `add` always had, just extended so one
+  bad note can't leave the batch half-applied. Once every note in the batch
+  has passed that check, each is added independently via `Collection::
+  add_note`, and its own success (note id, card count) or failure is
+  reported without aborting the rest of the batch — that second failure
+  mode is for genuine per-note rslib content requirements (e.g. a Cloze
+  note missing its `{{c1::}}` deletion) that only surface at add time and
+  have nothing to do with the other notes in the file.
+- `notetypes list`/`notetypes show` (`notetypes.rs`) mirror `decks.rs`'s
+  functional-core style: `Collection::get_all_notetypes`/
+  `get_notetype_by_name` do the I/O, a pure function renders the result.
+  `list` sorts by name for deterministic output, since
+  `get_all_notetypes`'s order isn't documented by rslib. `show`'s field
+  list is exactly `Notetype::fields`'s declared order — the same order
+  `cards add --field`/the note-file format require — pinned against a real
+  in-memory collection the same way `indents_nested_decks_by_level` pins
+  the deck tree, since rslib has already been mis-modeled here once.
+- `decks add` deliberately doesn't reuse `get_or_create_normal_deck`'s
+  "return the existing deck" behavior for an exact-name collision: it calls
+  `get_deck_id` first and errors if the deck already exists, since a
+  command whose whole point is "make a new deck" silently no-op'ing on an
+  existing one is the same kind of typo trap `cards add`'s
+  deck/notetype-must-already-exist check guards against, just inverted.
+  Missing parent segments of a `::`-nested name (e.g. `Spanish::Vocab` when
+  only `Spanish` exists) are still created automatically — that's rslib's
+  own `match_or_create_parents`, invoked by `add_deck_inner` for any new
+  deck, nested or not, and is the same behavior Anki's own deck picker
+  relies on.

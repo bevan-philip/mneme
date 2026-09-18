@@ -37,6 +37,11 @@ pub enum Command {
         #[command(subcommand)]
         command: DecksCommand,
     },
+    /// Inspect notetypes (field names and order) in the collection
+    Notetypes {
+        #[command(subcommand)]
+        command: NotetypesCommand,
+    },
     /// Read and write cards (and the notes behind them)
     Cards {
         #[command(subcommand)]
@@ -56,6 +61,23 @@ pub enum ProfileCommand {
 pub enum DecksCommand {
     /// List all decks in the collection
     List,
+    /// Create a new deck, including any missing `::`-nested parents
+    Add {
+        /// Deck name, e.g. "Spanish::Vocab::Week3"
+        name: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum NotetypesCommand {
+    /// List all notetypes in the collection, by name and id
+    List,
+    /// Show a notetype's field names (in the order `cards add`/the
+    /// note-file format expect) and template names
+    Show {
+        /// Notetype name, as printed by `notetypes list`
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -97,8 +119,14 @@ pub enum CardsCommand {
         /// the notetype's own order. Mutually exclusive with --input
         #[arg(long = "field", value_name = "NAME=VALUE", conflicts_with = "input")]
         fields: Vec<String>,
-        /// Read fields (and tags) from a file in the same format as
-        /// `cards show`, instead of passing --field repeatedly
+        /// Read one or more notes (fields and tags) from a file in the same
+        /// format as `cards show`, instead of passing --field repeatedly.
+        /// Multiple notes are separated by a line containing exactly `---`,
+        /// preceded by a blank line (or at the very start of the file);
+        /// every note is validated up front (unknown field names, a
+        /// mismatched `# notetype:` header) before any are added, so an
+        /// invalid batch adds none of it. Each note is then added and
+        /// reported on independently.
         #[arg(long)]
         input: Option<PathBuf>,
     },
