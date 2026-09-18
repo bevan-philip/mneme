@@ -65,6 +65,21 @@ pub fn fingerprint(path: &Path) -> String {
     format!("{hash:016x}")
 }
 
+/// Truncate `label` to at most `max_bytes` bytes, on a char boundary. For
+/// a purely cosmetic label (the identity lives elsewhere) that still needs
+/// to fit comfortably under a filesystem's per-component name limit even
+/// for a pathologically long input.
+pub fn truncate_label(label: &str, max_bytes: usize) -> &str {
+    if label.len() <= max_bytes {
+        return label;
+    }
+    let mut end = max_bytes;
+    while !label.is_char_boundary(end) {
+        end -= 1;
+    }
+    &label[..end]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,6 +97,15 @@ mod tests {
         assert!(!is_profile_name(OsStr::new("../outside")));
         assert!(!is_profile_name(OsStr::new("a/b")));
         assert!(!is_profile_name(OsStr::new("/etc")));
+    }
+
+    #[test]
+    fn truncate_label_stays_on_a_char_boundary() {
+        assert_eq!(truncate_label("hello", 10), "hello");
+        assert_eq!(truncate_label("hello world", 5), "hello");
+        // "é" is 2 bytes (U+00E9); a budget landing mid-character should
+        // back off to the previous boundary rather than panic or split it.
+        assert_eq!(truncate_label("aé", 2), "a");
     }
 
     #[cfg(unix)]

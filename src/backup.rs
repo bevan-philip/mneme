@@ -24,6 +24,10 @@ fn backup_root(collection_path: &Path) -> Result<PathBuf> {
         .and_then(Path::file_name)
         .map(|name| name.to_string_lossy())
         .unwrap_or_default();
+    // The fingerprint alone already carries the identity, so bound the
+    // label well under typical filesystem per-component name limits (e.g.
+    // ext4's 255 bytes) even for a pathologically long profile name.
+    let label = paths::truncate_label(&label, 64);
     let namespace = format!("{}-{label}", paths::fingerprint(&absolute));
     Ok(base.join("anki-cli").join("backups").join(namespace))
 }

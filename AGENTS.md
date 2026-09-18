@@ -66,3 +66,15 @@
   documented as a profile *name*, and joining an unvalidated one onto
   `anki2_root` would let `../elsewhere` or an absolute value silently
   target a collection outside the selected root.
+- `backup_root`'s `<label>` is truncated (`paths::truncate_label`, 64
+  bytes) before joining: it's cosmetic only (the fingerprint already
+  carries the identity), but an untruncated, otherwise-valid long profile
+  name could push the directory component past a filesystem's per-
+  component limit (e.g. ext4's 255 bytes) and make `create_dir_all` fail
+  for a profile that's perfectly fine on its own.
+- `decks.rs` has a test (`indents_nested_decks_by_level`) pinning rslib's
+  deck-tree level numbering against a real in-memory collection: the
+  synthetic root is level 0, so real top-level decks are level 1 (no
+  indent) and their children level 2. Worth keeping since a review bot
+  once modeled this backwards — trust this test over a re-derivation from
+  reading the rslib source.
