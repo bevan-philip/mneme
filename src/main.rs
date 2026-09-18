@@ -40,7 +40,8 @@ fn main() -> Result<()> {
         Command::Backup => {
             let profile_name = profile::resolve_profile(&anki2_root, cli.profile.as_deref())?;
             let collection_path = paths::collection_path(&anki2_root, &profile_name);
-            let dest = backup::backup_collection(&collection_path)?;
+            let mut col = store::open_collection(&collection_path).map_err(open_error_to_anyhow)?;
+            let dest = backup::backup_collection(&mut col)?;
             println!(
                 "backed up {} to {}",
                 collection_path.display(),

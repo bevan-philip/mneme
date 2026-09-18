@@ -28,3 +28,9 @@
 - Profile default-detection doesn't parse `prefs21.db` (it's a pickled
   Python value) — `resolve_profile` requires `--profile` whenever more than
   one profile directory exists.
+- `backup_collection` goes through `Collection::maybe_backup`, not
+  `fs::copy` of `collection.anki2`: a raw file copy can miss committed
+  data still sitting in the WAL, and skips the lock check that opening a
+  `Collection` gives us for free. rslib's own backup writes a `.colpkg`
+  with second-granularity, self-thinning naming, which is also good
+  enough collision resistance for us — no need to invent our own.
