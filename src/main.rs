@@ -120,25 +120,40 @@ fn run_cards_command(col: &mut anki::collection::Collection, command: CardsComma
             fields,
             input,
         } => {
-            let (fields, tags) = if let Some(path) = input {
+            if let Some(path) = input {
                 let text = std::fs::read_to_string(&path)
                     .with_context(|| format!("failed to read {}", path.display()))?;
-                let (file_notetype, tags, fields) = cards::parse_note_file_for_add(&text)?;
-                if let Some(file_notetype) = file_notetype
-                    && file_notetype != notetype
-                {
-                    anyhow::bail!(
-                        "file is for notetype `{file_notetype}`, but --notetype was `{notetype}`"
-                    );
+                let parsed_notes = cards::parse_note_files_for_add(&text)?;
+                let outcomes = cards::add_many(col, &notetype, &deck, &parsed_notes)?;
+
+                let mut failed = 0;
+                for (idx, outcome) in outcomes.iter().enumerate() {
+                    match outcome {
+                        cards::NoteOutcome::Added {
+                            note_id,
+                            card_count,
+                        } => {
+                            println!(
+                                "note {}: added as {note_id} ({card_count} card(s))",
+                                idx + 1
+                            );
+                        }
+                        cards::NoteOutcome::Failed { error } => {
+                            failed += 1;
+                            println!("note {}: failed: {error}", idx + 1);
+                        }
+                    }
                 }
-                (fields, tags)
+                if failed > 0 {
+                    anyhow::bail!("{failed} of {} note(s) failed to add", outcomes.len());
+                }
             } else if !fields.is_empty() {
-                (cards::parse_field_args(&fields)?, Vec::new())
+                let fields = cards::parse_field_args(&fields)?;
+                let (note_id, card_count) = cards::add(col, &notetype, &deck, &fields, &[])?;
+                println!("added note {note_id} ({card_count} card(s))");
             } else {
                 anyhow::bail!("provide either --field NAME=VALUE or --input FILE");
-            };
-            let (note_id, card_count) = cards::add(col, &notetype, &deck, &fields, &tags)?;
-            println!("added note {note_id} ({card_count} card(s))");
+            }
         }
     }
     Ok(())

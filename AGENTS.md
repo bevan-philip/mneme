@@ -120,6 +120,26 @@
   stored field can never actually contain a `\r` to lose. Pinned by
   `rslib_normalizes_carriage_returns_out_of_fields` in `cards.rs` — don't
   "fix" the line-splitting here to chase a CRLF that can't reach storage.
+- `cards add --input` accepts a file holding several notes, separated by a
+  line containing exactly `---` (`NOTE_DELIMITER`/`split_note_blocks` in
+  `cards.rs`); a file with no such line is still just one note, so this is
+  fully backward compatible with `cards show`'s single-note output. `---`
+  was picked because it can't collide with the `# notetype:`/`## FieldName`
+  header syntax; `escape_field` now also backslash-escapes a field body
+  line that's exactly `---`, the same way it already escapes `## `-prefixed
+  lines, so that content round-trips through `show`/multi-note `add`
+  unchanged.
+- `cards::add_many` validates every note in a multi-note batch (its
+  `# notetype:` header against `--notetype`, its fields against the
+  notetype's own field names) *before* adding any of them: this is the same
+  typo-safety guarantee single-note `add` always had, just extended so one
+  bad note can't leave the batch half-applied. Once every note in the batch
+  has passed that check, each is added independently via `Collection::
+  add_note`, and its own success (note id, card count) or failure is
+  reported without aborting the rest of the batch — that second failure
+  mode is for genuine per-note rslib content requirements (e.g. a Cloze
+  note missing its `{{c1::}}` deletion) that only surface at add time and
+  have nothing to do with the other notes in the file.
 - `notetypes list`/`notetypes show` (`notetypes.rs`) mirror `decks.rs`'s
   functional-core style: `Collection::get_all_notetypes`/
   `get_notetype_by_name` do the I/O, a pure function renders the result.

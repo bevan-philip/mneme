@@ -119,8 +119,13 @@ pub enum CardsCommand {
         /// the notetype's own order. Mutually exclusive with --input
         #[arg(long = "field", value_name = "NAME=VALUE", conflicts_with = "input")]
         fields: Vec<String>,
-        /// Read fields (and tags) from a file in the same format as
-        /// `cards show`, instead of passing --field repeatedly
+        /// Read one or more notes (fields and tags) from a file in the same
+        /// format as `cards show`, instead of passing --field repeatedly.
+        /// Multiple notes are separated by a line containing exactly `---`;
+        /// every note is validated up front (unknown field names, a
+        /// mismatched `# notetype:` header) before any are added, so an
+        /// invalid batch adds none of it. Each note is then added and
+        /// reported on independently.
         #[arg(long)]
         input: Option<PathBuf>,
     },
