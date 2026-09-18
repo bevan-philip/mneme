@@ -36,6 +36,16 @@ pub fn discover_profiles(anki2_root: &Path) -> Result<Vec<OsString>> {
 /// asking for `--profile` explicitly. See AGENTS.md for follow-up notes.
 pub fn resolve_profile(anki2_root: &Path, requested: Option<&OsStr>) -> Result<OsString> {
     if let Some(name) = requested {
+        if !anki2_root.join(name).join("collection.anki2").is_file() {
+            // Collection opening always creates a missing file, so without
+            // this check a typo'd --profile would silently create and
+            // operate on a fresh, empty collection instead of erroring.
+            bail!(
+                "no Anki profile named \"{}\" found under {}",
+                name.to_string_lossy(),
+                anki2_root.display()
+            );
+        }
         return Ok(name.to_os_string());
     }
     match discover_profiles(anki2_root)?.as_slice() {

@@ -54,3 +54,9 @@
   would target a directory that doesn't exist, and `CollectionBuilder`
   would then silently create a fresh, wrong collection there instead of
   opening the real one.
+- `resolve_profile` checks `collection.anki2` exists even for an explicit
+  `--profile`, not just during auto-discovery: `CollectionBuilder` always
+  creates a missing collection rather than erroring, so without this
+  check a typo'd `--profile` would silently create and operate on a
+  fresh, empty collection — exactly the "arbitrary database" behavior
+  README says this CLI isn't for.
