@@ -140,13 +140,37 @@ fn render_note_file(note: &Note, notetype: &Notetype) -> String {
     out.push('\n');
     for (field, value) in notetype.fields.iter().zip(note.fields()) {
         writeln!(out, "## {}", field.name).unwrap();
-        out.push_str(value);
-        if !value.ends_with('\n') {
-            out.push('\n');
-        }
+        out.push_str(&escape_field(value));
+        // A fixed two-newline boundary (not "however many the value
+        // already ends with"), so parsing can strip exactly that much back
+        // off and recover the value's own trailing newlines untouched.
+        out.push('\n');
         out.push('\n');
     }
     out
+}
+
+/// Escape a line that would otherwise be misread as a `## FieldName`
+/// section boundary, or as an escaped line, when the field's raw content
+/// contains it verbatim.
+fn escape_field(value: &str) -> String {
+    value
+        .split('\n')
+        .map(|line| {
+            if line.starts_with('\\') || line.starts_with("## ") {
+                format!("\\{line}")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Undo `escape_field`, one already-split line at a time (parsing already
+/// works line by line).
+fn unescape_field_line(line: &str) -> &str {
+    line.strip_prefix('\\').unwrap_or(line)
 }
 
 #[derive(Default, Debug, PartialEq, Eq)]
@@ -180,7 +204,7 @@ fn parse_note_file(text: &str) -> Result<ParsedNoteFile> {
             }
             current = Some((name.trim().to_string(), String::new()));
         } else if let Some((_, content)) = current.as_mut() {
-            content.push_str(line);
+            content.push_str(unescape_field_line(line));
             content.push('\n');
         } else {
             bail!("expected a `## FieldName` heading, found: {line}");
@@ -197,8 +221,20 @@ fn parse_note_file(text: &str) -> Result<ParsedNoteFile> {
     Ok(parsed)
 }
 
-fn trim_field(content: String) -> String {
-    content.trim_end_matches('\n').to_string()
+/// Strip exactly the two-newline boundary `render_note_file` always adds
+/// after a field's value, leaving any trailing newlines that were actually
+/// part of the value untouched. A hand-edited file that omits the trailing
+/// blank line (e.g. no blank line before EOF) just has fewer than two to
+/// strip, which is fine.
+fn trim_field(mut content: String) -> String {
+    for _ in 0..2 {
+        if content.ends_with('\n') {
+            content.pop();
+        } else {
+            break;
+        }
+    }
+    content
 }
 
 fn apply_note_file(note: &mut Note, notetype: &Notetype, parsed: &ParsedNoteFile) -> Result<()> {
@@ -307,6 +343,58 @@ mod tests {
 
         let redumped = show(&mut col, card_id.0).unwrap();
         assert!(redumped.contains("## Back\nfour\n"));
+    }
+
+    #[test]
+    fn preserves_trailing_newlines_through_show_and_edit() {
+        use anki::notes::NoteId;
+
+        let mut col = CollectionBuilder::default().build().unwrap();
+        let (deck, notetype) = basic_deck_and_notetype(&mut col);
+        let fields = vec![
+            ("Front".to_string(), "Q".to_string()),
+            ("Back".to_string(), "line1\nline2\n".to_string()),
+        ];
+        let (note_id, _) = add(&mut col, &notetype, &deck, &fields, &[]).unwrap();
+
+        let card_id = col
+            .search_cards("", SortMode::NoOrder)
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        // Re-applying an unedited dump must be a no-op on the stored field.
+        let dumped = show(&mut col, card_id.0).unwrap();
+        edit(&mut col, card_id.0, &dumped).unwrap();
+
+        let note = col.storage.get_note(NoteId(note_id)).unwrap().unwrap();
+        assert_eq!(note.fields()[1], "line1\nline2\n");
+    }
+
+    #[test]
+    fn preserves_field_lines_that_look_like_section_headers() {
+        use anki::notes::NoteId;
+
+        let mut col = CollectionBuilder::default().build().unwrap();
+        let (deck, notetype) = basic_deck_and_notetype(&mut col);
+        let back = "before\n## Not a heading\n\\## Also not one\nafter";
+        let fields = vec![
+            ("Front".to_string(), "Q".to_string()),
+            ("Back".to_string(), back.to_string()),
+        ];
+        let (note_id, _) = add(&mut col, &notetype, &deck, &fields, &[]).unwrap();
+
+        let card_id = col
+            .search_cards("", SortMode::NoOrder)
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        let dumped = show(&mut col, card_id.0).unwrap();
+        edit(&mut col, card_id.0, &dumped).unwrap();
+
+        let note = col.storage.get_note(NoteId(note_id)).unwrap().unwrap();
+        assert_eq!(note.fields()[1], back);
     }
 
     #[test]

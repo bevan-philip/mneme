@@ -94,6 +94,15 @@
   verbatim. Fields are matched by exact name and notetype order (not
   reordered by name) so a misspelled field name is a hard error instead of
   silently landing in the wrong slot.
+- Two details make that round-trip exact rather than approximate, both
+  covered by tests: (1) a field body line starting with `## ` (or `\`)
+  would otherwise be misread as the next section boundary, so
+  `escape_field`/`unescape_field_line` backslash-escape it on the way out
+  and back; (2) the boundary `render_note_file` writes after each value is
+  a *fixed* two newlines regardless of what the value itself ends with, so
+  `trim_field` can strip exactly that much back off instead of
+  `trim_end_matches('\n')`-ing away trailing newlines that were actually
+  part of the field's own content.
 - `cards add`/`cards edit` don't auto-create the deck or notetype named on
   the command line: `Note::new`/`add_note` would happily proceed with
   whatever's found, but a typo'd `--deck`/`--notetype` silently landing in
