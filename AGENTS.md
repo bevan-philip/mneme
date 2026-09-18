@@ -40,4 +40,7 @@
   different `--anki2-root`s sharing a profile name would otherwise prune
   each other's recovery points too. `paths::fingerprint` is a plain FNV-1a
   hash of the (lexically absolute) root path — no new dependency, no need
-  for the path to exist yet.
+  for the path to exist yet. It hashes the platform's lossless byte/UTF-16
+  view of the path (`OsStrExt`), not `to_string_lossy()`: on Unix, two
+  different non-UTF-8 paths can both collapse to the same replacement-
+  character string and so collide.
