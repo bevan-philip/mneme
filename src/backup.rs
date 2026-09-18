@@ -4,9 +4,13 @@ use anki::collection::Collection;
 use anyhow::Context;
 use anyhow::Result;
 
-fn backup_root() -> Result<PathBuf> {
+/// A directory per profile, since rslib's own backup thinning treats every
+/// file in the directory it's given as one collection's history: sharing a
+/// directory across profiles would let backing up one profile prune
+/// another's recovery points.
+fn backup_root(profile: &str) -> Result<PathBuf> {
     let base = dirs::cache_dir().context("could not determine the platform cache directory")?;
-    Ok(base.join("anki-cli").join("backups"))
+    Ok(base.join("anki-cli").join("backups").join(profile))
 }
 
 /// Back up the (already open) collection through rslib's own backup
@@ -16,8 +20,8 @@ fn backup_root() -> Result<PathBuf> {
 /// collision-resistant, self-thinning naming. Callers should do this before
 /// any mutating command runs, so a bug in this CLI can't destroy a user's
 /// real data.
-pub fn backup_collection(col: &mut Collection) -> Result<PathBuf> {
-    let dir = backup_root()?;
+pub fn backup_collection(col: &mut Collection, profile: &str) -> Result<PathBuf> {
+    let dir = backup_root(profile)?;
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("failed to create backup directory {}", dir.display()))?;
     col.maybe_backup(dir.clone(), true)

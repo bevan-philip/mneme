@@ -34,3 +34,8 @@
   `Collection` gives us for free. rslib's own backup writes a `.colpkg`
   with second-granularity, self-thinning naming, which is also good
   enough collision resistance for us — no need to invent our own.
+- Backups are written under a per-profile subdirectory (not one shared
+  `backups/` folder): rslib's thinning treats every file in the directory
+  it's given as one collection's retention history, so sharing a
+  directory across profiles would let backing up one profile prune
+  another's recovery points.
