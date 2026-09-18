@@ -120,3 +120,12 @@
   stored field can never actually contain a `\r` to lose. Pinned by
   `rslib_normalizes_carriage_returns_out_of_fields` in `cards.rs` — don't
   "fix" the line-splitting here to chase a CRLF that can't reach storage.
+- `notetypes list`/`notetypes show` (`notetypes.rs`) mirror `decks.rs`'s
+  functional-core style: `Collection::get_all_notetypes`/
+  `get_notetype_by_name` do the I/O, a pure function renders the result.
+  `list` sorts by name for deterministic output, since
+  `get_all_notetypes`'s order isn't documented by rslib. `show`'s field
+  list is exactly `Notetype::fields`'s declared order — the same order
+  `cards add --field`/the note-file format require — pinned against a real
+  in-memory collection the same way `indents_nested_decks_by_level` pins
+  the deck tree, since rslib has already been mis-modeled here once.

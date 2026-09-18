@@ -37,6 +37,11 @@ pub enum Command {
         #[command(subcommand)]
         command: DecksCommand,
     },
+    /// Inspect notetypes (field names and order) in the collection
+    Notetypes {
+        #[command(subcommand)]
+        command: NotetypesCommand,
+    },
     /// Read and write cards (and the notes behind them)
     Cards {
         #[command(subcommand)]
@@ -56,6 +61,18 @@ pub enum ProfileCommand {
 pub enum DecksCommand {
     /// List all decks in the collection
     List,
+}
+
+#[derive(Subcommand)]
+pub enum NotetypesCommand {
+    /// List all notetypes in the collection, by name and id
+    List,
+    /// Show a notetype's field names (in the order `cards add`/the
+    /// note-file format expect) and template names
+    Show {
+        /// Notetype name, as printed by `notetypes list`
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]

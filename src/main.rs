@@ -2,6 +2,7 @@ mod backup;
 mod cards;
 mod cli;
 mod decks;
+mod notetypes;
 mod paths;
 mod profile;
 mod store;
@@ -14,6 +15,7 @@ use cli::CardsCommand;
 use cli::Cli;
 use cli::Command;
 use cli::DecksCommand;
+use cli::NotetypesCommand;
 use cli::ProfileCommand;
 
 fn main() -> Result<()> {
@@ -58,6 +60,19 @@ fn main() -> Result<()> {
             let collection_path = paths::collection_path(&anki2_root, &profile_name);
             let mut col = store::open_collection(&collection_path).map_err(open_error_to_anyhow)?;
             print!("{}", decks::list_decks(&mut col)?);
+        }
+        Command::Notetypes { command } => {
+            let profile_name = profile::resolve_profile(&anki2_root, requested_profile)?;
+            let collection_path = paths::collection_path(&anki2_root, &profile_name);
+            let mut col = store::open_collection(&collection_path).map_err(open_error_to_anyhow)?;
+            match command {
+                NotetypesCommand::List => {
+                    print!("{}", notetypes::list_notetypes(&mut col)?);
+                }
+                NotetypesCommand::Show { name } => {
+                    print!("{}", notetypes::show_notetype(&mut col, &name)?);
+                }
+            }
         }
         Command::Cards { command } => {
             let profile_name = profile::resolve_profile(&anki2_root, requested_profile)?;
