@@ -61,6 +61,11 @@ pub enum ProfileCommand {
 pub enum DecksCommand {
     /// List all decks in the collection
     List,
+    /// Create a new deck, including any missing `::`-nested parents
+    Add {
+        /// Deck name, e.g. "Spanish::Vocab::Week3"
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]

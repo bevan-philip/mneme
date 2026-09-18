@@ -1,11 +1,31 @@
 use anki::collection::Collection;
 use anki_proto::decks::DeckTreeNode;
+use anyhow::Context;
 use anyhow::Result;
+use anyhow::bail;
 
 /// Fetch the deck tree via rslib's own scheduler-aware search, and render it.
 pub fn list_decks(col: &mut Collection) -> Result<String> {
     let tree = col.deck_tree(None)?;
     Ok(render_deck_tree(&tree))
+}
+
+/// Create a new deck named `name` (which may be `::`-nested, e.g.
+/// "Spanish::Vocab::Week3"), erroring if a deck with that exact name already
+/// exists rather than silently returning the existing one:
+/// `get_or_create_normal_deck` is happy to do the latter, but that's the
+/// wrong default for a command whose entire point is "make a new deck", per
+/// this codebase's usual typo-safety stance. Any missing parent segments of
+/// a nested name are created automatically by rslib's own
+/// `match_or_create_parents`, the same as Anki's deck picker.
+pub fn add_deck(col: &mut Collection, name: &str) -> Result<i64> {
+    if col.get_deck_id(name)?.is_some() {
+        bail!("deck `{name}` already exists");
+    }
+    let deck = col
+        .get_or_create_normal_deck(name)
+        .with_context(|| format!("failed to create deck `{name}`"))?;
+    Ok(deck.id.0)
 }
 
 /// Turn a deck tree into an indented listing, one deck per line.
@@ -46,5 +66,24 @@ mod tests {
         let listing = list_decks(&mut col).unwrap();
 
         assert_eq!(listing, "Other\nParent\n  Child\n");
+    }
+
+    #[test]
+    fn creates_nested_deck_with_missing_parents() {
+        let mut col = CollectionBuilder::default().build().unwrap();
+
+        add_deck(&mut col, "Parent::Child").unwrap();
+
+        let listing = list_decks(&mut col).unwrap();
+        assert_eq!(listing, "Parent\n  Child\n");
+    }
+
+    #[test]
+    fn rejects_creating_a_deck_that_already_exists() {
+        let mut col = CollectionBuilder::default().build().unwrap();
+        col.get_or_create_normal_deck("Existing").unwrap();
+
+        let err = add_deck(&mut col, "Existing").unwrap_err();
+        assert!(err.to_string().contains("already exists"));
     }
 }

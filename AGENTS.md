@@ -129,3 +129,14 @@
   `cards add --field`/the note-file format require — pinned against a real
   in-memory collection the same way `indents_nested_decks_by_level` pins
   the deck tree, since rslib has already been mis-modeled here once.
+- `decks add` deliberately doesn't reuse `get_or_create_normal_deck`'s
+  "return the existing deck" behavior for an exact-name collision: it calls
+  `get_deck_id` first and errors if the deck already exists, since a
+  command whose whole point is "make a new deck" silently no-op'ing on an
+  existing one is the same kind of typo trap `cards add`'s
+  deck/notetype-must-already-exist check guards against, just inverted.
+  Missing parent segments of a `::`-nested name (e.g. `Spanish::Vocab` when
+  only `Spanish` exists) are still created automatically — that's rslib's
+  own `match_or_create_parents`, invoked by `add_deck_inner` for any new
+  deck, nested or not, and is the same behavior Anki's own deck picker
+  relies on.

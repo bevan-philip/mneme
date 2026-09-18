@@ -53,13 +53,19 @@ fn main() -> Result<()> {
                 dest.display()
             );
         }
-        Command::Decks {
-            command: DecksCommand::List,
-        } => {
+        Command::Decks { command } => {
             let profile_name = profile::resolve_profile(&anki2_root, requested_profile)?;
             let collection_path = paths::collection_path(&anki2_root, &profile_name);
             let mut col = store::open_collection(&collection_path).map_err(open_error_to_anyhow)?;
-            print!("{}", decks::list_decks(&mut col)?);
+            match command {
+                DecksCommand::List => {
+                    print!("{}", decks::list_decks(&mut col)?);
+                }
+                DecksCommand::Add { name } => {
+                    let deck_id = decks::add_deck(&mut col, &name)?;
+                    println!("created deck {name} ({deck_id})");
+                }
+            }
         }
         Command::Notetypes { command } => {
             let profile_name = profile::resolve_profile(&anki2_root, requested_profile)?;
