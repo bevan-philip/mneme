@@ -1,3 +1,5 @@
+use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
 
@@ -5,7 +7,10 @@ use anyhow::Result;
 use anyhow::bail;
 
 /// Profile directories under `anki2_root` that contain a collection file.
-pub fn discover_profiles(anki2_root: &Path) -> Result<Vec<String>> {
+/// Returned as `OsString`, not `String`: these are real directory names
+/// from `read_dir`, and lossy-converting them here would let a non-UTF-8
+/// name get rejoined into a path that doesn't actually exist.
+pub fn discover_profiles(anki2_root: &Path) -> Result<Vec<OsString>> {
     let mut profiles = Vec::new();
     if !anki2_root.is_dir() {
         return Ok(profiles);
@@ -16,7 +21,7 @@ pub fn discover_profiles(anki2_root: &Path) -> Result<Vec<String>> {
             continue;
         }
         if entry.path().join("collection.anki2").is_file() {
-            profiles.push(entry.file_name().to_string_lossy().into_owned());
+            profiles.push(entry.file_name());
         }
     }
     profiles.sort();
@@ -29,9 +34,9 @@ pub fn discover_profiles(anki2_root: &Path) -> Result<Vec<String>> {
 /// `prefs21.db` records Anki desktop's own default profile, but as a pickled
 /// Python value, so we don't parse it here; ambiguity is instead resolved by
 /// asking for `--profile` explicitly. See AGENTS.md for follow-up notes.
-pub fn resolve_profile(anki2_root: &Path, requested: Option<&str>) -> Result<String> {
+pub fn resolve_profile(anki2_root: &Path, requested: Option<&OsStr>) -> Result<OsString> {
     if let Some(name) = requested {
-        return Ok(name.to_string());
+        return Ok(name.to_os_string());
     }
     match discover_profiles(anki2_root)?.as_slice() {
         [] => bail!(
@@ -41,7 +46,10 @@ pub fn resolve_profile(anki2_root: &Path, requested: Option<&str>) -> Result<Str
         [only] => Ok(only.clone()),
         many => bail!(
             "multiple Anki profiles found ({}); pass --profile to pick one",
-            many.join(", ")
+            many.iter()
+                .map(|name| name.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
     }
 }

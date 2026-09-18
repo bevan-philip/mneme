@@ -23,6 +23,7 @@ fn main() -> Result<()> {
         .context(
             "could not determine the Anki2 data directory for this platform; pass --anki2-root",
         )?;
+    let requested_profile = cli.profile.as_deref().map(std::path::Path::as_os_str);
 
     match cli.command {
         Command::Profile {
@@ -33,15 +34,15 @@ fn main() -> Result<()> {
                 println!("no profiles found under {}", anki2_root.display());
             } else {
                 for name in profiles {
-                    println!("{name}");
+                    println!("{}", name.to_string_lossy());
                 }
             }
         }
         Command::Backup => {
-            let profile_name = profile::resolve_profile(&anki2_root, cli.profile.as_deref())?;
+            let profile_name = profile::resolve_profile(&anki2_root, requested_profile)?;
             let collection_path = paths::collection_path(&anki2_root, &profile_name);
             let mut col = store::open_collection(&collection_path).map_err(open_error_to_anyhow)?;
-            let dest = backup::backup_collection(&mut col, &anki2_root, &profile_name)?;
+            let dest = backup::backup_collection(&mut col, &collection_path)?;
             println!(
                 "backed up {} to {}",
                 collection_path.display(),
@@ -51,7 +52,7 @@ fn main() -> Result<()> {
         Command::Decks {
             command: DecksCommand::List,
         } => {
-            let profile_name = profile::resolve_profile(&anki2_root, cli.profile.as_deref())?;
+            let profile_name = profile::resolve_profile(&anki2_root, requested_profile)?;
             let collection_path = paths::collection_path(&anki2_root, &profile_name);
             let mut col = store::open_collection(&collection_path).map_err(open_error_to_anyhow)?;
             print!("{}", decks::list_decks(&mut col)?);

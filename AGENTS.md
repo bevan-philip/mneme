@@ -34,13 +34,23 @@
   `Collection` gives us for free. rslib's own backup writes a `.colpkg`
   with second-granularity, self-thinning naming, which is also good
   enough collision resistance for us — no need to invent our own.
-- Backups are written under a `<fingerprint(anki2_root)>-<profile>`
-  subdirectory, not just `<profile>`: rslib's thinning treats every file in
-  the directory it's given as one collection's retention history, so two
-  different `--anki2-root`s sharing a profile name would otherwise prune
-  each other's recovery points too. `paths::fingerprint` is a plain FNV-1a
-  hash of the (lexically absolute) root path — no new dependency, no need
-  for the path to exist yet. It hashes the platform's lossless byte/UTF-16
-  view of the path (`OsStrExt`), not `to_string_lossy()`: on Unix, two
-  different non-UTF-8 paths can both collapse to the same replacement-
-  character string and so collide.
+- Backups are written under a `<fingerprint(collection_path)>-<label>`
+  subdirectory, fingerprinting the whole (lexically-absolute) collection
+  path rather than root and profile separately: rslib's thinning treats
+  every file in the directory it's given as one collection's retention
+  history, so anything short of a per-collection directory risks one
+  backup pruning another's recovery points. `<label>` is just the profile
+  name for browsability and doesn't need to be collision-resistant itself.
+  `paths::fingerprint` is a plain FNV-1a hash — no new dependency, no need
+  for the path to exist yet — over the platform's lossless byte/UTF-16 view
+  of the path (`OsStrExt`), not `to_string_lossy()`: on Unix, two different
+  non-UTF-8 paths can both collapse to the same replacement-character
+  string and so collide.
+- Profile names are carried as `OsString`/`&OsStr` (`PathBuf` for the CLI
+  flag) from `discover_profiles` through `resolve_profile` to
+  `paths::collection_path`, not lossy-converted to `String` until the
+  point of display. A profile directory could in principle contain
+  non-UTF-8 bytes; `to_string_lossy()`-ing it before rejoining to a path
+  would target a directory that doesn't exist, and `CollectionBuilder`
+  would then silently create a fresh, wrong collection there instead of
+  opening the real one.

@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -9,8 +10,10 @@ pub fn default_anki2_root() -> Option<PathBuf> {
 }
 
 /// Path to a profile's collection file, given the Anki2 root and profile
-/// name.
-pub fn collection_path(anki2_root: &Path, profile: &str) -> PathBuf {
+/// name. Takes the profile name as a raw `OsStr`, not `str`: it's a
+/// directory name we got from `read_dir`, and lossy-converting it before
+/// rejoining it to a path could target a directory that doesn't exist.
+pub fn collection_path(anki2_root: &Path, profile: &OsStr) -> PathBuf {
     anki2_root.join(profile).join("collection.anki2")
 }
 

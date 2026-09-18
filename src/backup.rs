@@ -7,16 +7,24 @@ use anyhow::Result;
 
 use crate::paths;
 
-/// A directory per (anki2_root, profile) pair, since rslib's own backup
-/// thinning treats every file in the directory it's given as one
-/// collection's history: sharing a directory across profiles — or across
-/// same-named profiles under different `--anki2-root`s — would let backing
-/// up one collection prune another's recovery points.
-fn backup_root(anki2_root: &Path, profile: &str) -> Result<PathBuf> {
+/// A directory unique to this exact collection file, since rslib's own
+/// backup thinning treats every file in the directory it's given as one
+/// collection's retention history: sharing a directory across collections
+/// (different profiles, or same-named profiles under different
+/// `--anki2-root`s) would let backing up one collection prune another's
+/// recovery points. Named from a lossless fingerprint of the full,
+/// lexically-absolute collection path; the profile-name suffix is only for
+/// browsability; it doesn't need to be collision-resistant itself.
+fn backup_root(collection_path: &Path) -> Result<PathBuf> {
     let base = dirs::cache_dir().context("could not determine the platform cache directory")?;
-    let absolute_root = std::path::absolute(anki2_root)
-        .with_context(|| format!("failed to resolve {}", anki2_root.display()))?;
-    let namespace = format!("{}-{profile}", paths::fingerprint(&absolute_root));
+    let absolute = std::path::absolute(collection_path)
+        .with_context(|| format!("failed to resolve {}", collection_path.display()))?;
+    let label = collection_path
+        .parent()
+        .and_then(Path::file_name)
+        .map(|name| name.to_string_lossy())
+        .unwrap_or_default();
+    let namespace = format!("{}-{label}", paths::fingerprint(&absolute));
     Ok(base.join("anki-cli").join("backups").join(namespace))
 }
 
@@ -27,12 +35,8 @@ fn backup_root(anki2_root: &Path, profile: &str) -> Result<PathBuf> {
 /// collision-resistant, self-thinning naming. Callers should do this before
 /// any mutating command runs, so a bug in this CLI can't destroy a user's
 /// real data.
-pub fn backup_collection(
-    col: &mut Collection,
-    anki2_root: &Path,
-    profile: &str,
-) -> Result<PathBuf> {
-    let dir = backup_root(anki2_root, profile)?;
+pub fn backup_collection(col: &mut Collection, collection_path: &Path) -> Result<PathBuf> {
+    let dir = backup_root(collection_path)?;
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("failed to create backup directory {}", dir.display()))?;
     col.maybe_backup(dir.clone(), true)

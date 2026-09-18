@@ -10,9 +10,11 @@ use clap::Subcommand;
 )]
 pub struct Cli {
     /// Anki profile to use. Defaults to the only profile found on disk; if
-    /// there are several, one must be named explicitly.
+    /// there are several, one must be named explicitly. Typed as a raw path
+    /// component (not `String`) so a non-UTF-8 profile directory name can
+    /// still be targeted exactly.
     #[arg(long, global = true)]
-    pub profile: Option<String>,
+    pub profile: Option<PathBuf>,
 
     /// Override the Anki2 data root (defaults to the platform's Anki2
     /// folder, e.g. ~/.local/share/Anki2 on Linux).
