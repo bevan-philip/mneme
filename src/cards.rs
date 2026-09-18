@@ -57,11 +57,21 @@ fn format_card_list(summaries: &[CardSummary]) -> String {
         writeln!(
             out,
             "{}\t{}\t{}\t{}",
-            s.id, s.deck_name, s.notetype_name, preview
+            s.id,
+            sanitize_tsv_field(&s.deck_name),
+            sanitize_tsv_field(&s.notetype_name),
+            sanitize_tsv_field(preview),
         )
         .unwrap();
     }
     out
+}
+
+/// Replace a literal tab with a space so every row of the tab-separated
+/// `cards list` output has exactly four columns, regardless of what the
+/// deck/notetype name or rendered question happens to contain.
+fn sanitize_tsv_field(field: &str) -> String {
+    field.replace('\t', " ")
 }
 
 /// Dump the note behind `card_id` as an editable text file (see
@@ -395,6 +405,41 @@ mod tests {
 
         let note = col.storage.get_note(NoteId(note_id)).unwrap().unwrap();
         assert_eq!(note.fields()[1], back);
+    }
+
+    #[test]
+    fn rslib_normalizes_carriage_returns_out_of_fields() {
+        // rslib's own field normalization (`notes::invalid_char_for_field`)
+        // strips every ASCII control character except `\n`/`\t` on every
+        // `add_note`/`update_note`, so a stored field can never contain a
+        // `\r` regardless of what cards.rs's own parsing does with one.
+        // Pinned here so nobody "fixes" the line-splitting in
+        // `parse_note_file` to chase a CRLF that can't reach storage in the
+        // first place.
+        use anki::notes::NoteId;
+
+        let mut col = CollectionBuilder::default().build().unwrap();
+        let (deck, notetype) = basic_deck_and_notetype(&mut col);
+        let fields = vec![
+            ("Front".to_string(), "Q".to_string()),
+            ("Back".to_string(), "line1\r\nline2".to_string()),
+        ];
+        let (note_id, _) = add(&mut col, &notetype, &deck, &fields, &[]).unwrap();
+
+        let note = col.storage.get_note(NoteId(note_id)).unwrap().unwrap();
+        assert_eq!(note.fields()[1], "line1\nline2");
+    }
+
+    #[test]
+    fn sanitizes_tabs_in_card_list_columns() {
+        let summaries = vec![CardSummary {
+            id: 1,
+            deck_name: "Deck".to_string(),
+            notetype_name: "Basic".to_string(),
+            question: "a\tb".to_string(),
+        }];
+        let listing = format_card_list(&summaries);
+        assert_eq!(listing, "1\tDeck\tBasic\ta b\n");
     }
 
     #[test]

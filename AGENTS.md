@@ -108,3 +108,15 @@
   whatever's found, but a typo'd `--deck`/`--notetype` silently landing in
   the wrong place (or creating a stray deck) is worse than an error naming
   `decks list` as the way to check what exists.
+- `cards list`'s tab-separated output sanitizes every column (deck name,
+  notetype name, question preview) by replacing literal tabs with spaces —
+  otherwise a field containing a tab produces a row with more than four
+  columns, breaking anything parsing the listing.
+- `parse_note_file` deliberately still uses plain `str::lines()` (which
+  folds a `\r` immediately before `\n` into the terminator and drops it)
+  rather than a CRLF-preserving split: rslib's own field normalization
+  (`notes::invalid_char_for_field`) strips every ASCII control character
+  except `\n`/`\t` on every `add_note`/`update_note` regardless, so a
+  stored field can never actually contain a `\r` to lose. Pinned by
+  `rslib_normalizes_carriage_returns_out_of_fields` in `cards.rs` — don't
+  "fix" the line-splitting here to chase a CRLF that can't reach storage.
