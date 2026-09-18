@@ -13,3 +13,15 @@ pub fn default_anki2_root() -> Option<PathBuf> {
 pub fn collection_path(anki2_root: &Path, profile: &str) -> PathBuf {
     anki2_root.join(profile).join("collection.anki2")
 }
+
+/// A short, stable fingerprint (FNV-1a) of a path's textual form. Used to
+/// tell apart same-named profiles under different `--anki2-root`s without
+/// depending on the path already existing on disk.
+pub fn fingerprint(path: &Path) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in path.to_string_lossy().as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}

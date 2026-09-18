@@ -34,8 +34,10 @@
   `Collection` gives us for free. rslib's own backup writes a `.colpkg`
   with second-granularity, self-thinning naming, which is also good
   enough collision resistance for us — no need to invent our own.
-- Backups are written under a per-profile subdirectory (not one shared
-  `backups/` folder): rslib's thinning treats every file in the directory
-  it's given as one collection's retention history, so sharing a
-  directory across profiles would let backing up one profile prune
-  another's recovery points.
+- Backups are written under a `<fingerprint(anki2_root)>-<profile>`
+  subdirectory, not just `<profile>`: rslib's thinning treats every file in
+  the directory it's given as one collection's retention history, so two
+  different `--anki2-root`s sharing a profile name would otherwise prune
+  each other's recovery points too. `paths::fingerprint` is a plain FNV-1a
+  hash of the (lexically absolute) root path — no new dependency, no need
+  for the path to exist yet.
