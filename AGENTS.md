@@ -129,6 +129,25 @@
   line that's exactly `---`, the same way it already escapes `## `-prefixed
   lines, so that content round-trips through `show`/multi-note `add`
   unchanged.
+- That escaping only protects notes dumped *after* the delimiter existed.
+  A note file dumped by an older `cards show` could have an unescaped
+  `---` sitting in a field's own content, so `split_note_blocks` only
+  treats a `---` line as a boundary when it's immediately preceded by a
+  blank line (or is the file's first line) — the same position every `## `
+  header occupies. That doesn't make the delimiter unambiguous (a `---`
+  that was already isolated on its own paragraph in old prose is
+  indistinguishable from a deliberate separator, and can't be made so
+  without a different, uglier delimiter), but it does mean a `---` that's
+  merely part of a running line of text — the common case — round-trips as
+  content instead of silently truncating the field at that point. Pinned
+  by `a_delimiter_line_not_preceded_by_a_blank_line_is_kept_as_field_content`
+  in `cards.rs`.
+- `parse_note_files_for_add` errors on an input file with zero notes in it
+  (empty, whitespace-only, or every block within it blank) instead of
+  quietly returning `Ok(vec![])`: `parse_note_file` already refused this
+  for the single-note case ("no `## FieldName` sections found"), and
+  `cards::add_many` iterating zero notes would otherwise print nothing and
+  exit 0 for what's almost always a bad file, not an intentional no-op.
 - `cards::add_many` validates every note in a multi-note batch (its
   `# notetype:` header against `--notetype`, its fields against the
   notetype's own field names) *before* adding any of them: this is the same

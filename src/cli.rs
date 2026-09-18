@@ -121,7 +121,8 @@ pub enum CardsCommand {
         fields: Vec<String>,
         /// Read one or more notes (fields and tags) from a file in the same
         /// format as `cards show`, instead of passing --field repeatedly.
-        /// Multiple notes are separated by a line containing exactly `---`;
+        /// Multiple notes are separated by a line containing exactly `---`,
+        /// preceded by a blank line (or at the very start of the file);
         /// every note is validated up front (unknown field names, a
         /// mismatched `# notetype:` header) before any are added, so an
         /// invalid batch adds none of it. Each note is then added and

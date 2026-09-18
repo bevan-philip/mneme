@@ -292,17 +292,26 @@ fn set_fields(note: &mut Note, notetype: &Notetype, fields: &[(String, String)])
     Ok(())
 }
 
-/// Split a `--input` file into one chunk per note, on lines that are
-/// exactly `NOTE_DELIMITER`. A field body line equal to the delimiter is
-/// escaped by `escape_field` to `\---`, which doesn't match here, so it
-/// can't be mistaken for a boundary. A file with no delimiter line at all
-/// is just one chunk (the whole file), so single-note files parse exactly
-/// as before.
+/// Split a `--input` file into one chunk per note, on a line that's
+/// exactly `NOTE_DELIMITER` *and* immediately preceded by a blank line (or
+/// is the first line of the file) — the same position every `## ` section
+/// header occupies, per `render_note_file`'s fixed two-newline field
+/// boundary. `escape_field` unconditionally escapes a field body line
+/// that's exactly `---` (regardless of what surrounds it), so a file dumped
+/// after this delimiter existed is never ambiguous. But a file dumped
+/// *before* it existed could contain a legitimate, unescaped `---` line as
+/// part of a field's own content; requiring the blank line keeps such a
+/// line, so long as it isn't already isolated as its own paragraph, from
+/// being misread as a note boundary instead of being preserved as content.
+/// A file with no recognized delimiter line at all is just one chunk (the
+/// whole file), so single-note files parse exactly as before.
 fn split_note_blocks(text: &str) -> Vec<String> {
+    let lines: Vec<&str> = text.lines().collect();
     let mut blocks = Vec::new();
     let mut current = String::new();
-    for line in text.lines() {
-        if line == NOTE_DELIMITER {
+    for (i, &line) in lines.iter().enumerate() {
+        let preceded_by_blank_or_start = i == 0 || lines[i - 1].trim().is_empty();
+        if line == NOTE_DELIMITER && preceded_by_blank_or_start {
             blocks.push(current);
             current = String::new();
         } else {
@@ -317,14 +326,24 @@ fn split_note_blocks(text: &str) -> Vec<String> {
 /// Parse a `--input` file (see `show`/`render_note_file`) holding one or
 /// more notes for `cards add`: returns, per note, its optional notetype
 /// header (for the caller to cross-check against `--notetype`), its tags,
-/// and its fields.
+/// and its fields. Errors (rather than silently returning zero notes) if
+/// the file has no notes at all, e.g. it's empty or whitespace-only —
+/// `parse_note_file` already refused that for the single-note case, and an
+/// empty batch silently "succeeding" would hide a bad file the same way
+/// aborting a batch partway through would.
 #[allow(clippy::type_complexity)]
 pub fn parse_note_files_for_add(
     text: &str,
 ) -> Result<Vec<(Option<String>, Vec<String>, Vec<(String, String)>)>> {
-    split_note_blocks(text)
+    let blocks: Vec<String> = split_note_blocks(text)
         .into_iter()
         .filter(|block| !block.trim().is_empty())
+        .collect();
+    if blocks.is_empty() {
+        bail!("no `## FieldName` sections found");
+    }
+    blocks
+        .into_iter()
         .map(|block| {
             let parsed = parse_note_file(&block)?;
             Ok((
@@ -575,6 +594,27 @@ mod tests {
         let parsed = parse_note_files_for_add(text).unwrap();
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].0.as_deref(), Some("Basic"));
+    }
+
+    #[test]
+    fn rejects_an_empty_input_file() {
+        let err = parse_note_files_for_add("").unwrap_err();
+        assert!(err.to_string().contains("no `## FieldName` sections found"));
+
+        let err = parse_note_files_for_add("   \n\n  \n").unwrap_err();
+        assert!(err.to_string().contains("no `## FieldName` sections found"));
+    }
+
+    #[test]
+    fn a_delimiter_line_not_preceded_by_a_blank_line_is_kept_as_field_content() {
+        // Simulates a file dumped by a `cards show` from before this
+        // delimiter existed, where a field's own `---` line was never
+        // escaped: since it isn't isolated on its own blank-preceded line,
+        // it must be read back as ordinary content, not a note boundary.
+        let text = "## Front\nQ\n\n## Back\nline1\n---\nline2\n";
+        let parsed = parse_note_files_for_add(text).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].2[1].1, "line1\n---\nline2");
     }
 
     #[test]
