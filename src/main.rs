@@ -6,6 +6,7 @@ mod notetypes;
 mod paths;
 mod profile;
 mod store;
+mod sync;
 
 use anyhow::Context;
 use anyhow::Result;
@@ -75,8 +76,8 @@ fn main() -> Result<()> {
                 NotetypesCommand::List => {
                     print!("{}", notetypes::list_notetypes(&mut col)?);
                 }
-                NotetypesCommand::Show { name } => {
-                    print!("{}", notetypes::show_notetype(&mut col, &name)?);
+                NotetypesCommand::Show { name, full } => {
+                    print!("{}", notetypes::show_notetype(&mut col, &name, full)?);
                 }
             }
         }
@@ -153,6 +154,52 @@ fn run_cards_command(col: &mut anki::collection::Collection, command: CardsComma
                 println!("added note {note_id} ({card_count} card(s))");
             } else {
                 anyhow::bail!("provide either --field NAME=VALUE or --input FILE");
+            }
+        }
+        CardsCommand::Sync {
+            input,
+            create_deck,
+            no_write_ids,
+        } => {
+            let text = std::fs::read_to_string(&input)
+                .with_context(|| format!("failed to read {}", input.display()))?;
+            let notes = sync::parse_sync_file(&text)?;
+            let outcomes = sync::sync(col, &notes, create_deck)?;
+
+            let (mut added, mut updated, mut unchanged, mut failed) = (0, 0, 0, 0);
+            for (idx, outcome) in outcomes.iter().enumerate() {
+                match outcome {
+                    sync::SyncOutcome::Added {
+                        note_id,
+                        card_count,
+                    } => {
+                        added += 1;
+                        println!(
+                            "note {}: added as {note_id} ({card_count} card(s))",
+                            idx + 1
+                        );
+                    }
+                    sync::SyncOutcome::Updated { note_id } => {
+                        updated += 1;
+                        println!("note {}: updated {note_id}", idx + 1);
+                    }
+                    sync::SyncOutcome::Unchanged { .. } => unchanged += 1,
+                    sync::SyncOutcome::Failed { error } => {
+                        failed += 1;
+                        println!("note {}: failed: {error}", idx + 1);
+                    }
+                }
+            }
+            println!("{added} added, {updated} updated, {unchanged} unchanged, {failed} failed");
+
+            if added > 0 && !no_write_ids {
+                let written = sync::write_note_ids(&text, &notes, &outcomes);
+                std::fs::write(&input, written)
+                    .with_context(|| format!("failed to write ids back to {}", input.display()))?;
+                println!("wrote {added} new note id(s) to {}", input.display());
+            }
+            if failed > 0 {
+                anyhow::bail!("{failed} of {} note(s) failed to sync", outcomes.len());
             }
         }
     }

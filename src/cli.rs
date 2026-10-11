@@ -77,6 +77,9 @@ pub enum NotetypesCommand {
     Show {
         /// Notetype name, as printed by `notetypes list`
         name: String,
+        /// Also print each template's front/back HTML and the CSS
+        #[arg(long)]
+        full: bool,
     },
 }
 
@@ -129,5 +132,23 @@ pub enum CardsCommand {
         /// reported on independently.
         #[arg(long)]
         input: Option<PathBuf>,
+    },
+    /// Add or update notes from a note file, making the file the source of
+    /// truth. Each note block may carry `# notetype:`, `# deck:` and
+    /// `# tags:` headers (later blocks inherit any the first block sets) and
+    /// a `# nid:` header: blocks with a nid update that note, blocks without
+    /// one are added and get their new nid written back into the file.
+    /// Everything is validated before anything is written. Notes removed
+    /// from the file are left alone in Anki.
+    Sync {
+        /// Note file to sync (same format as `cards add --input`)
+        #[arg(long)]
+        input: PathBuf,
+        /// Create any deck named in the file that doesn't exist yet
+        #[arg(long)]
+        create_deck: bool,
+        /// Don't write new note ids back into the file
+        #[arg(long)]
+        no_write_ids: bool,
     },
 }

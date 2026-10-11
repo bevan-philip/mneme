@@ -189,13 +189,15 @@ fn unescape_field_line(line: &str) -> &str {
 }
 
 #[derive(Default, Debug, PartialEq, Eq)]
-struct ParsedNoteFile {
-    notetype: Option<String>,
-    tags: Option<Vec<String>>,
-    fields: Vec<(String, String)>,
+pub(crate) struct ParsedNoteFile {
+    pub(crate) notetype: Option<String>,
+    pub(crate) deck: Option<String>,
+    pub(crate) note_id: Option<i64>,
+    pub(crate) tags: Option<Vec<String>>,
+    pub(crate) fields: Vec<(String, String)>,
 }
 
-fn parse_note_file(text: &str) -> Result<ParsedNoteFile> {
+pub(crate) fn parse_note_file(text: &str) -> Result<ParsedNoteFile> {
     let mut parsed = ParsedNoteFile::default();
     let mut lines = text.lines().peekable();
 
@@ -205,6 +207,14 @@ fn parse_note_file(text: &str) -> Result<ParsedNoteFile> {
         }
         if let Some(rest) = line.strip_prefix("# notetype:") {
             parsed.notetype = Some(rest.trim().to_string());
+        } else if let Some(rest) = line.strip_prefix("# deck:") {
+            parsed.deck = Some(rest.trim().to_string());
+        } else if let Some(rest) = line.strip_prefix("# nid:") {
+            let rest = rest.trim();
+            parsed.note_id = Some(
+                rest.parse()
+                    .with_context(|| format!("`# nid:` is not a note id: {rest}"))?,
+            );
         } else if let Some(rest) = line.strip_prefix("# tags:") {
             parsed.tags = Some(rest.split_whitespace().map(str::to_string).collect());
         }
@@ -275,7 +285,11 @@ fn apply_note_file(note: &mut Note, notetype: &Notetype, parsed: &ParsedNoteFile
 /// notetype's own fields, in the notetype's own order: field content is
 /// free-form HTML, so matching by position rather than reordering by name
 /// avoids guessing at intent when a name is misspelled.
-fn set_fields(note: &mut Note, notetype: &Notetype, fields: &[(String, String)]) -> Result<()> {
+pub(crate) fn set_fields(
+    note: &mut Note,
+    notetype: &Notetype,
+    fields: &[(String, String)],
+) -> Result<()> {
     let expected: Vec<&str> = notetype.fields.iter().map(|f| f.name.as_str()).collect();
     let given: Vec<&str> = fields.iter().map(|(name, _)| name.as_str()).collect();
     if given != expected {
@@ -305,22 +319,37 @@ fn set_fields(note: &mut Note, notetype: &Notetype, fields: &[(String, String)])
 /// being misread as a note boundary instead of being preserved as content.
 /// A file with no recognized delimiter line at all is just one chunk (the
 /// whole file), so single-note files parse exactly as before.
-fn split_note_blocks(text: &str) -> Vec<String> {
-    let lines: Vec<&str> = text.lines().collect();
-    let mut blocks = Vec::new();
-    let mut current = String::new();
-    for (i, &line) in lines.iter().enumerate() {
-        let preceded_by_blank_or_start = i == 0 || lines[i - 1].trim().is_empty();
-        if line == NOTE_DELIMITER && preceded_by_blank_or_start {
-            blocks.push(current);
-            current = String::new();
-        } else {
-            current.push_str(line);
-            current.push('\n');
+fn split_note_blocks(text: &str) -> Vec<&str> {
+    note_block_spans(text)
+        .into_iter()
+        .map(|span| &text[span])
+        .collect()
+}
+
+/// The byte ranges of `split_note_blocks`'s blocks within `text`, excluding
+/// the delimiter lines themselves. Kept as ranges into the original text
+/// (rather than re-joined lines) so `cards sync` can write note ids back
+/// into the file at a block's exact position, leaving every other byte —
+/// including CRLF line endings — untouched.
+pub(crate) fn note_block_spans(text: &str) -> Vec<std::ops::Range<usize>> {
+    let mut spans = Vec::new();
+    let mut block_start = 0;
+    let mut offset = 0;
+    let mut previous_blank = true;
+    for raw_line in text.split_inclusive('\n') {
+        let line = raw_line
+            .strip_suffix('\n')
+            .map(|l| l.strip_suffix('\r').unwrap_or(l))
+            .unwrap_or(raw_line);
+        if line == NOTE_DELIMITER && previous_blank {
+            spans.push(block_start..offset);
+            block_start = offset + raw_line.len();
         }
+        previous_blank = line.trim().is_empty();
+        offset += raw_line.len();
     }
-    blocks.push(current);
-    blocks
+    spans.push(block_start..text.len());
+    spans
 }
 
 /// Parse a `--input` file (see `show`/`render_note_file`) holding one or
@@ -335,7 +364,7 @@ fn split_note_blocks(text: &str) -> Vec<String> {
 pub fn parse_note_files_for_add(
     text: &str,
 ) -> Result<Vec<(Option<String>, Vec<String>, Vec<(String, String)>)>> {
-    let blocks: Vec<String> = split_note_blocks(text)
+    let blocks: Vec<&str> = split_note_blocks(text)
         .into_iter()
         .filter(|block| !block.trim().is_empty())
         .collect();
@@ -345,7 +374,7 @@ pub fn parse_note_files_for_add(
     blocks
         .into_iter()
         .map(|block| {
-            let parsed = parse_note_file(&block)?;
+            let parsed = parse_note_file(block)?;
             Ok((
                 parsed.notetype,
                 parsed.tags.unwrap_or_default(),
