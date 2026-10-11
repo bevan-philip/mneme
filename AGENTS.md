@@ -179,3 +179,22 @@
   own `match_or_create_parents`, invoked by `add_deck_inner` for any new
   deck, nested or not, and is the same behavior Anki's own deck picker
   relies on.
+- `cards sync` (`sync.rs`) makes a note file the source of truth: blocks
+  with a `# nid:` update that note (fields, tags, and moving its cards to
+  the block's `# deck:`), blocks without one are added and get their new
+  nid written back. `# notetype:`/`# deck:`/`# tags:` omitted from a block
+  are inherited from the first block, so a file's top reads as its header;
+  `# nid:` never is. Notes removed from the file are deliberately left in
+  Anki — deleting from a missing block would turn a bad merge or a
+  truncated file into silent data loss.
+- Write-back goes through `note_block_spans` (byte ranges into the original
+  text) rather than re-rendering the file, so the only bytes that change
+  are the inserted `# nid:` lines; it matches the file's existing CRLF/LF.
+  `split_note_blocks` is now a thin wrapper over the same spans, so
+  `cards add` and `cards sync` can't disagree about where blocks are.
+- `sync` keeps `add_many`'s two-phase shape (validate everything, then
+  write each note independently) and adds nid checks to phase one. Missing
+  decks under `--create-deck` are only created after validation passes, so
+  a file that fails validation creates nothing. "Unchanged" is decided by
+  comparing fields and tags before calling `update_note` (rslib also skips
+  no-op updates itself, but doesn't report that back).
