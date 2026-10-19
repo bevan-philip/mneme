@@ -124,23 +124,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "anki-cli"
-version = "0.1.0"
-dependencies = [
- "anki",
- "anki_proto",
- "anyhow",
- "clap",
- "dirs 7.0.0",
- "reqwest",
- "rusqlite",
- "serde",
- "serde-pickle",
- "tempfile",
- "tokio",
-]
-
-[[package]]
 name = "anki_i18n"
 version = "0.0.0"
 source = "git+https://github.com/ankitects/anki.git?rev=4acb5329e6ad7944dad39cfcdae1519732654cf1#4acb5329e6ad7944dad39cfcdae1519732654cf1"
@@ -1788,6 +1771,23 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "mneme-anki"
+version = "0.1.0"
+dependencies = [
+ "anki",
+ "anki_proto",
+ "anyhow",
+ "clap",
+ "dirs 7.0.0",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde-pickle",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

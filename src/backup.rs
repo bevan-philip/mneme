@@ -29,7 +29,7 @@ fn backup_root(collection_path: &Path) -> Result<PathBuf> {
     // ext4's 255 bytes) even for a pathologically long profile name.
     let label = paths::truncate_label(&label, 64);
     let namespace = format!("{}-{label}", paths::fingerprint(&absolute));
-    Ok(base.join("anki-cli").join("backups").join(namespace))
+    Ok(base.join("mneme-anki").join("backups").join(namespace))
 }
 
 /// Back up the (already open) collection through rslib's own backup
