@@ -37,7 +37,7 @@ pub enum Command {
         #[command(subcommand)]
         command: DecksCommand,
     },
-    /// Inspect notetypes (field names and order) in the collection
+    /// Inspect notetypes, and add or restyle them
     Notetypes {
         #[command(subcommand)]
         command: NotetypesCommand,
@@ -84,6 +84,30 @@ pub enum NotetypesCommand {
         /// Also print each template's front/back HTML and the CSS
         #[arg(long)]
         full: bool,
+    },
+    /// Replace a notetype's card templates (front/back HTML) and CSS from a
+    /// file in `show --full` format. Its field and template lists must match
+    /// the notetype's exactly: changing either forces a one-way full sync,
+    /// so that stays in Anki desktop
+    Edit {
+        /// Notetype name, as printed by `notetypes list`
+        name: String,
+        /// File to read, as written by `notetypes show --full`
+        #[arg(long)]
+        input: PathBuf,
+    },
+    /// Create a notetype by cloning an existing one, like Anki's Manage Note
+    /// Types → Add → Clone, optionally with templates and CSS from a file
+    Add {
+        /// Name for the new notetype; must not already exist
+        name: String,
+        /// Existing notetype to clone
+        #[arg(long)]
+        from: String,
+        /// Apply templates and CSS from this file (`show --full` format of
+        /// the `--from` notetype, same rules as `edit`)
+        #[arg(long)]
+        input: Option<PathBuf>,
     },
 }
 

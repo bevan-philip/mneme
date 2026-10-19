@@ -168,7 +168,7 @@ const NOTE_DELIMITER: &str = "---";
 /// Escape a line that would otherwise be misread as a `## FieldName`
 /// section boundary, a note delimiter, or as an escaped line, when the
 /// field's raw content contains it verbatim.
-fn escape_field(value: &str) -> String {
+pub(crate) fn escape_field(value: &str) -> String {
     value
         .split('\n')
         .map(|line| {
@@ -184,7 +184,7 @@ fn escape_field(value: &str) -> String {
 
 /// Undo `escape_field`, one already-split line at a time (parsing already
 /// works line by line).
-fn unescape_field_line(line: &str) -> &str {
+pub(crate) fn unescape_field_line(line: &str) -> &str {
     line.strip_prefix('\\').unwrap_or(line)
 }
 
@@ -251,7 +251,7 @@ pub(crate) fn parse_note_file(text: &str) -> Result<ParsedNoteFile> {
 /// part of the value untouched. A hand-edited file that omits the trailing
 /// blank line (e.g. no blank line before EOF) just has fewer than two to
 /// strip, which is fine.
-fn trim_field(mut content: String) -> String {
+pub(crate) fn trim_field(mut content: String) -> String {
     for _ in 0..2 {
         if content.ends_with('\n') {
             content.pop();

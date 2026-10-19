@@ -96,6 +96,27 @@ fn main() -> Result<()> {
                 NotetypesCommand::Show { name, full } => {
                     print!("{}", notetypes::show_notetype(&mut col, &name, full)?);
                 }
+                NotetypesCommand::Edit { name, input } => {
+                    let text = std::fs::read_to_string(&input)
+                        .with_context(|| format!("failed to read {}", input.display()))?;
+                    match notetypes::edit_notetype(&mut col, &name, &text)? {
+                        notetypes::EditOutcome::Updated => println!("updated notetype {name}"),
+                        notetypes::EditOutcome::Unchanged => {
+                            println!("notetype {name} unchanged")
+                        }
+                    }
+                }
+                NotetypesCommand::Add { name, from, input } => {
+                    let text = input
+                        .map(|path| {
+                            std::fs::read_to_string(&path)
+                                .with_context(|| format!("failed to read {}", path.display()))
+                        })
+                        .transpose()?;
+                    let (id, name) =
+                        notetypes::add_notetype(&mut col, &name, &from, text.as_deref())?;
+                    println!("created notetype {name} ({id})");
+                }
             }
         }
         Command::Cards { command } => {

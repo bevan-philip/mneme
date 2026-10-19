@@ -217,3 +217,23 @@
   in-process sync server (`SimpleServer::make_server`), which reads its
   user from the `SYNC_USER1` env var; that's the only test allowed to touch
   the environment.
+- `notetypes edit`/`notetypes add --input` read `show --full` output, so
+  that format reuses `cards.rs`'s `escape_field`/`unescape_field_line`/
+  `trim_field` and fixed two-newline section boundary. Unlike note fields,
+  rslib doesn't strip `\r` from templates or CSS, so `parse_notetype_file`
+  splits on `\n` only and drops a `\r` per line only when the whole file is
+  CRLF (judged by its first line).
+- Both commands require the file's field and template lists to match the
+  notetype exactly. In rslib, `update_notetype` calls `set_schema_modified`
+  (which forces a one-way full sync) only from `schemachange.rs`, when field
+  or template ordinals are added, removed or reordered, or the sort field
+  moves. Template HTML and CSS edits don't trigger it. `add_notetype` never
+  does: a new notetype goes up in a normal sync. Desktop's Clone
+  (`models.copy`) doesn't call `mark_schema` either. Pinned by
+  `template_and_css_edits_and_clones_leave_the_schema_unmodified`, which
+  reads `sync_meta().schema` and uses a template reorder as its positive
+  control.
+- `notetypes add` checks the name is free first, because rslib's
+  `ensure_notetype_name_unique` would otherwise append `+` without saying
+  so. The clone copies what desktop's `models.copy` does: fresh id,
+  `original_id` cleared, everything else kept.
