@@ -217,16 +217,17 @@
   in-process sync server (`SimpleServer::make_server`), which reads its
   user from the `SYNC_USER1` env var; that's the only test allowed to touch
   the environment.
-- `notetypes edit`/`notetypes add --input` read `show --full` output, so
-  that format reuses `cards.rs`'s `escape_field`/`unescape_field_line`/
-  `trim_field` and fixed two-newline section boundary. `parse_notetype_file`
-  reads every `\r\n` as `\n`, whatever wrote the file. rslib doesn't strip
-  `\r` from templates or CSS the way it does from note fields, so a template
-  stored with CRLF comes back as LF. `edit_notetype` doesn't count that
-  difference as a change, but any real edit stores the LF form. That's
-  deliberate: line endings don't affect how HTML or CSS renders. Use
-  `show --output` rather than shell redirection, which can re-encode the file
-  (Windows PowerShell 5.1 writes UTF-16).
+- `notetypes edit`/`notetypes add --input` read `show --full` output with
+  the same `cards::split_sections`/`escape_field`/`trim_field` and fixed
+  two-newline boundary as note files. Unlike note fields, rslib keeps `\r`
+  in templates and CSS, so `parse_notetype_file` splits on `\n` alone and
+  only reads `\r\n` as `\n` in a file that's CRLF throughout (an editor's
+  conversion; `show`'s bare `\n\n` boundaries mean it never writes one).
+  The last section is the one an editor's "trim trailing blank lines" can
+  damage, so when its boundary is missing its stored trailing newlines are
+  kept. `--full` escapes the name lists; plain `show` prints them verbatim.
+  Use `show --output` rather than shell redirection, which can re-encode
+  the file (Windows PowerShell 5.1 writes UTF-16).
 - Both commands require the file's field and template lists to match the
   notetype exactly. In rslib, `update_notetype` calls `set_schema_modified`
   (which forces a one-way full sync) only from `schemachange.rs`, when field
@@ -239,5 +240,6 @@
   control.
 - `notetypes add` checks the name is free first, because rslib's
   `ensure_notetype_name_unique` would otherwise append `+` without saying
-  so. The clone copies what desktop's `models.copy` does: fresh id,
+  so. It checks the name rslib will store (`"` stripped, NFC), not the one
+  typed. The clone copies what desktop's `models.copy` does: fresh id,
   `original_id` cleared, everything else kept.

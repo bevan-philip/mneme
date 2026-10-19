@@ -199,12 +199,9 @@ pub(crate) struct ParsedNoteFile {
 
 pub(crate) fn parse_note_file(text: &str) -> Result<ParsedNoteFile> {
     let mut parsed = ParsedNoteFile::default();
-    let mut lines = text.lines().peekable();
+    let (preamble, sections) = split_sections(strip_bom(text).lines());
 
-    while let Some(line) = lines.peek() {
-        if line.starts_with("## ") {
-            break;
-        }
+    for line in preamble {
         if let Some(rest) = line.strip_prefix("# notetype:") {
             parsed.notetype = Some(rest.trim().to_string());
         } else if let Some(rest) = line.strip_prefix("# deck:") {
@@ -218,32 +215,44 @@ pub(crate) fn parse_note_file(text: &str) -> Result<ParsedNoteFile> {
         } else if let Some(rest) = line.strip_prefix("# tags:") {
             parsed.tags = Some(rest.split_whitespace().map(str::to_string).collect());
         }
-        lines.next();
     }
 
-    let mut current: Option<(String, String)> = None;
-    for line in lines {
-        if let Some(name) = line.strip_prefix("## ") {
-            if let Some((name, content)) = current.take() {
-                parsed.fields.push((name, trim_field(content)));
-            }
-            current = Some((name.trim().to_string(), String::new()));
-        } else if let Some((_, content)) = current.as_mut() {
-            content.push_str(unescape_field_line(line));
-            content.push('\n');
-        } else {
-            bail!("expected a `## FieldName` heading, found: {line}");
-        }
-    }
-    if let Some((name, content)) = current.take() {
-        parsed.fields.push((name, trim_field(content)));
-    }
-
+    parsed.fields = sections
+        .into_iter()
+        .map(|(name, content)| (name.trim().to_string(), trim_field(content)))
+        .collect();
     if parsed.fields.is_empty() {
         bail!("no `## FieldName` sections found");
     }
 
     Ok(parsed)
+}
+
+/// Drop a leading UTF-8 byte order mark, which some Windows tools write and
+/// which would otherwise hide a `# notetype:` header on the first line.
+pub(crate) fn strip_bom(text: &str) -> &str {
+    text.strip_prefix('\u{FEFF}').unwrap_or(text)
+}
+
+/// Split a file into its preamble (the lines before the first `## `
+/// heading) and its sections, each a heading (after `## `) and its
+/// unescaped content with every line's newline kept, for `trim_field`.
+pub(crate) fn split_sections<'a>(
+    lines: impl Iterator<Item = &'a str>,
+) -> (Vec<&'a str>, Vec<(&'a str, String)>) {
+    let mut lines = lines.peekable();
+    let is_heading = |line: &&str| line.starts_with("## ");
+    let preamble = std::iter::from_fn(|| lines.next_if(|l| !is_heading(l))).collect();
+    let mut sections = vec![];
+    while let Some(heading) = lines.next().and_then(|l| l.strip_prefix("## ")) {
+        let mut content = String::new();
+        while let Some(line) = lines.next_if(|l| !is_heading(l)) {
+            content.push_str(unescape_field_line(line));
+            content.push('\n');
+        }
+        sections.push((heading, content));
+    }
+    (preamble, sections)
 }
 
 /// Strip exactly the two-newline boundary `render_note_file` always adds

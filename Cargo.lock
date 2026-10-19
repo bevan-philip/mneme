@@ -1788,6 +1788,7 @@ dependencies = [
  "serde-pickle",
  "tempfile",
  "tokio",
+ "unicode-normalization",
 ]
 
 [[package]]

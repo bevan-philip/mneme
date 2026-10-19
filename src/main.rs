@@ -94,15 +94,7 @@ fn main() -> Result<()> {
                     print!("{}", notetypes::list_notetypes(&mut col)?);
                 }
                 NotetypesCommand::Show { name, full, output } => {
-                    let text = notetypes::show_notetype(&mut col, &name, full)?;
-                    match output {
-                        Some(path) => {
-                            std::fs::write(&path, &text)
-                                .with_context(|| format!("failed to write {}", path.display()))?;
-                            println!("wrote {}", path.display());
-                        }
-                        None => print!("{text}"),
-                    }
+                    emit(&notetypes::show_notetype(&mut col, &name, full)?, output)?;
                 }
                 NotetypesCommand::Edit { name, input } => {
                     let text = std::fs::read_to_string(&input)
@@ -138,6 +130,20 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+/// Print `text`, or write it to `output` byte for byte (shell redirection
+/// can re-encode it).
+fn emit(text: &str, output: Option<std::path::PathBuf>) -> Result<()> {
+    match output {
+        Some(path) => {
+            std::fs::write(&path, text)
+                .with_context(|| format!("failed to write {}", path.display()))?;
+            println!("wrote {}", path.display());
+        }
+        None => print!("{text}"),
+    }
+    Ok(())
+}
+
 fn run_cards_command(col: &mut anki::collection::Collection, command: CardsCommand) -> Result<()> {
     match command {
         CardsCommand::List { search } => {
@@ -145,15 +151,7 @@ fn run_cards_command(col: &mut anki::collection::Collection, command: CardsComma
             print!("{listing}");
         }
         CardsCommand::Show { card_id, output } => {
-            let text = cards::show(col, card_id)?;
-            match output {
-                Some(path) => {
-                    std::fs::write(&path, &text)
-                        .with_context(|| format!("failed to write {}", path.display()))?;
-                    println!("wrote {}", path.display());
-                }
-                None => print!("{text}"),
-            }
+            emit(&cards::show(col, card_id)?, output)?;
         }
         CardsCommand::Edit { card_id, input } => {
             let text = std::fs::read_to_string(&input)
