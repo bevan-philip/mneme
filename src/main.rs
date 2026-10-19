@@ -93,8 +93,16 @@ fn main() -> Result<()> {
                 NotetypesCommand::List => {
                     print!("{}", notetypes::list_notetypes(&mut col)?);
                 }
-                NotetypesCommand::Show { name, full } => {
-                    print!("{}", notetypes::show_notetype(&mut col, &name, full)?);
+                NotetypesCommand::Show { name, full, output } => {
+                    let text = notetypes::show_notetype(&mut col, &name, full)?;
+                    match output {
+                        Some(path) => {
+                            std::fs::write(&path, &text)
+                                .with_context(|| format!("failed to write {}", path.display()))?;
+                            println!("wrote {}", path.display());
+                        }
+                        None => print!("{text}"),
+                    }
                 }
                 NotetypesCommand::Edit { name, input } => {
                     let text = std::fs::read_to_string(&input)

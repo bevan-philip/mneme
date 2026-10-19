@@ -219,10 +219,14 @@
   the environment.
 - `notetypes edit`/`notetypes add --input` read `show --full` output, so
   that format reuses `cards.rs`'s `escape_field`/`unescape_field_line`/
-  `trim_field` and fixed two-newline section boundary. Unlike note fields,
-  rslib doesn't strip `\r` from templates or CSS, so `parse_notetype_file`
-  splits on `\n` only and drops a `\r` per line only when the whole file is
-  CRLF (judged by its first line).
+  `trim_field` and fixed two-newline section boundary. `parse_notetype_file`
+  reads every `\r\n` as `\n`, whatever wrote the file. rslib doesn't strip
+  `\r` from templates or CSS the way it does from note fields, so a template
+  stored with CRLF comes back as LF. `edit_notetype` doesn't count that
+  difference as a change, but any real edit stores the LF form. That's
+  deliberate: line endings don't affect how HTML or CSS renders. Use
+  `show --output` rather than shell redirection, which can re-encode the file
+  (Windows PowerShell 5.1 writes UTF-16).
 - Both commands require the file's field and template lists to match the
   notetype exactly. In rslib, `update_notetype` calls `set_schema_modified`
   (which forces a one-way full sync) only from `schemachange.rs`, when field

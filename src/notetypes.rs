@@ -96,26 +96,18 @@ pub(crate) struct ParsedNotetypeFile {
     css: String,
 }
 
-/// Parse `notetypes show --full` output. Unlike note fields (which rslib
-/// strips control characters from), a template or the CSS can legitimately
-/// hold a `\r`, so lines are split on `\n` alone; only a file an editor has
-/// converted to CRLF throughout (judged by its first line) gets one `\r`
-/// taken back off each line.
+/// Parse `notetypes show --full` output. Every `\r\n` is read as `\n`,
+/// whichever tool wrote the file: line endings aren't content in HTML or
+/// CSS, so a template stored with CRLF just comes back as LF (and
+/// `edit_notetype` doesn't count that as a change).
 pub(crate) fn parse_notetype_file(text: &str) -> Result<ParsedNotetypeFile> {
-    let crlf = text.split('\n').next().is_some_and(|l| l.ends_with('\r'));
+    let text = text.replace("\r\n", "\n");
     // Like `str::lines`, the newline ending the last line doesn't start
-    // another (empty) one.
+    // another (empty) one. Splitting on `\n` alone keeps a lone `\r`.
     let mut lines = text
         .strip_suffix('\n')
-        .unwrap_or(text)
+        .unwrap_or(&text)
         .split('\n')
-        .map(|l| {
-            if crlf {
-                l.strip_suffix('\r').unwrap_or(l)
-            } else {
-                l
-            }
-        })
         .peekable();
     let mut parsed = ParsedNotetypeFile::default();
 
@@ -172,7 +164,7 @@ pub(crate) fn parse_notetype_file(text: &str) -> Result<ParsedNotetypeFile> {
 
     let list = |value: Option<String>, header: &str| -> Result<Vec<String>> {
         let value = value.with_context(|| format!("missing `## {header}` section"))?;
-        Ok(value.lines().map(str::to_string).collect())
+        Ok(value.split('\n').map(str::to_string).collect())
     };
     parsed.fields = list(fields, "fields")?;
     parsed.templates = list(templates, "templates")?;
@@ -268,11 +260,22 @@ pub fn edit_notetype(col: &mut Collection, name: &str, text: &str) -> Result<Edi
         .with_context(|| format!("no such notetype: {name} (see `notetypes list`)"))?;
     let mut notetype = (*original).clone();
     apply_notetype_file(&mut notetype, &parsed)?;
-    if notetype == *original {
+    if notetype == with_lf_line_endings(&original) {
         return Ok(EditOutcome::Unchanged);
     }
     col.update_notetype(&mut notetype, false)?;
     Ok(EditOutcome::Updated)
+}
+
+/// `notetype` as `parse_notetype_file` would read it back, for comparing.
+fn with_lf_line_endings(notetype: &Notetype) -> Notetype {
+    let mut notetype = notetype.clone();
+    for template in &mut notetype.templates {
+        template.config.q_format = template.config.q_format.replace("\r\n", "\n");
+        template.config.a_format = template.config.a_format.replace("\r\n", "\n");
+    }
+    notetype.config.css = notetype.config.css.replace("\r\n", "\n");
+    notetype
 }
 
 /// Clone notetype `from` as `name`, the way desktop's Manage Note Types →
@@ -359,9 +362,10 @@ mod tests {
         ));
     }
 
-    /// Sets awkward template/CSS content directly through rslib (lines that
-    /// look like section headers or escapes, a `---`, a `\r`, trailing
-    /// newlines), then checks `show --full` → `edit` is a no-op.
+    /// Sets awkward names and template/CSS content directly through rslib
+    /// (lines that look like section headers or escapes, a `---`, a lone
+    /// `\r`, trailing newlines), then checks `show --full` → `edit` is a
+    /// no-op.
     #[test]
     fn full_show_round_trips_exactly_through_edit() {
         let mut col = CollectionBuilder::default().build().unwrap();
@@ -371,14 +375,18 @@ mod tests {
             .unwrap())
         .clone();
         nt.templates[0].config.q_format =
-            "{{Front}}\n## not a header\n\\backslash\n---\n<br>\r\n\n".into();
+            "{{Front}}\n## not a header\n\\backslash\n---\n<br>\r<br>\n".into();
+        nt.fields[1].name = "\\Back".into();
+        nt.templates[1].name = "## Card 2".into();
         nt.templates[1].config.a_format = "{{FrontSide}}\n\n## also not\n\n\n".into();
         nt.config.css = ".card {}\n## css\n".into();
         col.update_notetype(&mut nt, false).unwrap();
         let stored = col.get_notetype_by_name(&nt.name).unwrap().unwrap();
 
         let shown = show_notetype(&mut col, &nt.name, true).unwrap();
-        assert!(shown.contains("\n\\## not a header\n\\\\backslash\n\\---\n<br>\r\n"));
+        assert!(shown.contains("\n\\## not a header\n\\\\backslash\n\\---\n<br>\r<br>\n"));
+        assert!(shown.contains("## fields\nFront\n\\\\Back\n"));
+        assert!(shown.contains("## templates\nCard 1\n\\## Card 2\n"));
         let mut reparsed = (*stored).clone();
         apply_notetype_file(&mut reparsed, &parse_notetype_file(&shown).unwrap()).unwrap();
         assert_eq!(reparsed, *stored);
@@ -387,6 +395,31 @@ mod tests {
             edit_notetype(&mut col, &nt.name, &shown).unwrap(),
             EditOutcome::Unchanged
         );
+    }
+
+    /// A template or CSS stored with CRLF comes back from the file as LF
+    /// (see `parse_notetype_file`); that alone isn't a change, but any real
+    /// edit stores the LF form.
+    #[test]
+    fn stored_crlf_reads_as_unchanged_until_edited() {
+        let mut col = CollectionBuilder::default().build().unwrap();
+        let mut nt = (*col.get_notetype_by_name("Basic").unwrap().unwrap()).clone();
+        nt.config.css = ".card {\r\n}\r\n".into();
+        col.update_notetype(&mut nt, false).unwrap();
+        let shown = show_notetype(&mut col, "Basic", true).unwrap();
+
+        assert_eq!(
+            edit_notetype(&mut col, "Basic", &shown).unwrap(),
+            EditOutcome::Unchanged
+        );
+
+        let edited = shown.replace("{{Front}}\n", "<b>{{Front}}</b>\n");
+        assert_eq!(
+            edit_notetype(&mut col, "Basic", &edited).unwrap(),
+            EditOutcome::Updated
+        );
+        let stored = col.get_notetype_by_name("Basic").unwrap().unwrap();
+        assert_eq!(stored.config.css, ".card {\n}\n");
     }
 
     #[test]

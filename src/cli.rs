@@ -84,6 +84,11 @@ pub enum NotetypesCommand {
         /// Also print each template's front/back HTML and the CSS
         #[arg(long)]
         full: bool,
+        /// Write to this file instead of stdout, byte for byte (shell
+        /// redirection can re-encode it, e.g. as UTF-16 in Windows
+        /// PowerShell 5.1)
+        #[arg(long)]
+        output: Option<PathBuf>,
     },
     /// Replace a notetype's card templates (front/back HTML) and CSS from a
     /// file in `show --full` format. Its field and template lists must match
