@@ -5,7 +5,7 @@ use clap::Subcommand;
 
 #[derive(Parser)]
 #[command(
-    name = "anki-cli",
+    name = "mneme-anki",
     about = "A CLI for directly editing your Anki collection"
 )]
 pub struct Cli {
