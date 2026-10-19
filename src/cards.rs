@@ -199,7 +199,7 @@ pub(crate) struct ParsedNoteFile {
 
 pub(crate) fn parse_note_file(text: &str) -> Result<ParsedNoteFile> {
     let mut parsed = ParsedNoteFile::default();
-    let (preamble, sections) = split_sections(strip_bom(text).lines());
+    let (preamble, sections) = split_sections(text.lines());
 
     for line in preamble {
         if let Some(rest) = line.strip_prefix("# notetype:") {
@@ -226,12 +226,6 @@ pub(crate) fn parse_note_file(text: &str) -> Result<ParsedNoteFile> {
     }
 
     Ok(parsed)
-}
-
-/// Drop a leading UTF-8 byte order mark, which some Windows tools write and
-/// which would otherwise hide a `# notetype:` header on the first line.
-pub(crate) fn strip_bom(text: &str) -> &str {
-    text.strip_prefix('\u{FEFF}').unwrap_or(text)
 }
 
 /// Split a file into its preamble (the lines before the first `## `
@@ -338,18 +332,15 @@ fn split_note_blocks(text: &str) -> Vec<&str> {
 /// The byte ranges of `split_note_blocks`'s blocks within `text`, excluding
 /// the delimiter lines themselves. Kept as ranges into the original text
 /// (rather than re-joined lines) so `cards sync` can write note ids back
-/// into the file at a block's exact position, leaving every other byte —
-/// including CRLF line endings — untouched.
+/// into the file at a block's exact position, leaving every other byte
+/// untouched.
 pub(crate) fn note_block_spans(text: &str) -> Vec<std::ops::Range<usize>> {
     let mut spans = Vec::new();
     let mut block_start = 0;
     let mut offset = 0;
     let mut previous_blank = true;
     for raw_line in text.split_inclusive('\n') {
-        let line = raw_line
-            .strip_suffix('\n')
-            .map(|l| l.strip_suffix('\r').unwrap_or(l))
-            .unwrap_or(raw_line);
+        let line = raw_line.strip_suffix('\n').unwrap_or(raw_line);
         if line == NOTE_DELIMITER && previous_blank {
             spans.push(block_start..offset);
             block_start = offset + raw_line.len();

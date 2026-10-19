@@ -12,7 +12,6 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::cards::escape_field;
 use crate::cards::split_sections;
-use crate::cards::strip_bom;
 use crate::cards::trim_field;
 
 /// List every notetype's name and id, one per line, sorted by name for
@@ -42,19 +41,27 @@ fn notetype_by_name(col: &mut Collection, name: &str) -> Result<Arc<Notetype>> {
 /// holds can be read without opening Anki.
 pub fn show_notetype(col: &mut Collection, name: &str, full: bool) -> Result<String> {
     let notetype = notetype_by_name(col, name)?;
-    let mut out = render_notetype(&notetype, full);
-    if full {
-        out.push_str(&render_notetype_styling(&notetype));
-        // The last section's fixed two-newline boundary.
-        out.push('\n');
-    }
-    Ok(out)
+    Ok(if full {
+        render_notetype_file(&notetype)
+    } else {
+        render_notetype(&notetype, false)
+    })
+}
+
+/// The `show --full` output that `edit`/`add --input` read back.
+fn render_notetype_file(notetype: &Notetype) -> String {
+    let mut out = render_notetype(notetype, true);
+    out.push_str(&render_notetype_styling(notetype));
+    // The last section's fixed two-newline boundary.
+    out.push('\n');
+    out
 }
 
 /// The `--full` sections: each template's front and back, then the CSS.
 /// Every section ends with the same fixed two-newline boundary
 /// `cards::render_note_file` uses, and its body is escaped the same way, so
-/// `parse_notetype_file` can recover each value exactly.
+/// `parse_notetype_file` can recover each value (bar a `\r` before a line
+/// break, which `str::lines` drops).
 fn render_notetype_styling(notetype: &Notetype) -> String {
     let mut out = String::new();
     for template in &notetype.templates {
@@ -114,6 +121,12 @@ struct Sides {
     back: Option<Value>,
 }
 
+impl Sides {
+    fn get(&self, front: bool) -> Option<&Value> {
+        if front { &self.front } else { &self.back }.as_ref()
+    }
+}
+
 /// A template side or the CSS. `exact` is false only for the file's last
 /// section when its trailing blank lines were trimmed (as many editors do on
 /// save): the value's own trailing newlines can't be told apart from the
@@ -125,6 +138,16 @@ struct Value {
 }
 
 impl Value {
+    /// `stored` itself if this reads the same as `show` printed it
+    /// (`shown`), so an untouched value keeps its exact bytes; else this.
+    fn pick(&self, shown: &str, stored: &str) -> String {
+        if self.resolve(shown) == shown {
+            stored.to_string()
+        } else {
+            self.resolve(stored)
+        }
+    }
+
     fn resolve(&self, current: &str) -> String {
         if self.exact {
             return self.text.clone();
@@ -134,23 +157,9 @@ impl Value {
     }
 }
 
-/// Parse `notetypes show --full` output. rslib keeps `\r` in templates and
-/// CSS (unlike note fields), so lines are split on `\n` alone and every `\r`
-/// is content, except in a file that's CRLF throughout: an editor converted
-/// that one (`show` never writes it, its blank lines are bare `\n\n`).
+/// Parse `notetypes show --full` output.
 pub(crate) fn parse_notetype_file(text: &str) -> Result<ParsedNotetypeFile> {
-    let text = strip_bom(text);
-    let newlines = text.matches('\n').count();
-    let lf;
-    let text = if newlines > 0 && text.matches("\r\n").count() == newlines {
-        lf = text.replace("\r\n", "\n");
-        &lf
-    } else {
-        text
-    };
-    // Like `str::lines`, the newline ending the last line doesn't start
-    // another (empty) one.
-    let (preamble, sections) = split_sections(text.strip_suffix('\n').unwrap_or(text).split('\n'));
+    let (preamble, sections) = split_sections(text.lines());
 
     let mut notetype = None;
     for line in preamble {
@@ -221,50 +230,55 @@ fn parse_template_header(header: &str) -> Result<(&str, bool)> {
 /// renaming or reordering either is a schema change in Anki, which forces a
 /// one-way full sync, so it's left to Anki desktop.
 fn apply_notetype_file(notetype: &mut Notetype, parsed: &ParsedNotetypeFile) -> Result<()> {
+    // The file is checked against what `show --full` printed, read back the
+    // same way, rather than against the stored values `str::lines` might not
+    // reproduce exactly.
+    let shown = parse_notetype_file(&render_notetype_file(notetype))?;
     if let Some(expected) = &parsed.notetype
-        && expected != &notetype.name
+        && parsed.notetype != shown.notetype
     {
         bail!("file is for notetype `{expected}`, not `{}`", notetype.name);
     }
-    let fields: Vec<&str> = notetype.fields.iter().map(|f| f.name.as_str()).collect();
-    if parsed.fields != fields {
+    if parsed.fields != shown.fields {
         bail!(
-            "fields {:?} don't match notetype `{}` fields {fields:?}; changing fields \
+            "fields {:?} don't match notetype `{}` fields {:?}; changing fields \
              forces a full sync, so do it in Anki desktop",
             parsed.fields,
-            notetype.name
+            notetype.name,
+            shown.fields
         );
     }
-    let templates: Vec<&str> = notetype.templates.iter().map(|t| t.name.as_str()).collect();
-    if parsed.templates != templates {
+    if parsed.templates != shown.templates {
         bail!(
-            "templates {:?} don't match notetype `{}` templates {templates:?}; changing \
+            "templates {:?} don't match notetype `{}` templates {:?}; changing \
              templates forces a full sync, so do it in Anki desktop",
             parsed.templates,
-            notetype.name
+            notetype.name,
+            shown.templates
         );
     }
     if let Some(name) = parsed
         .sides
         .keys()
-        .find(|name| !templates.contains(&name.as_str()))
+        .find(|name| !shown.templates.contains(name))
     {
         bail!("`## template: {name}` isn't in the `## templates` list");
     }
 
-    for template in &mut notetype.templates {
-        let sides = parsed.sides.get(&template.name);
-        let missing = |which| format!("missing `## template: {} ({which})` section", template.name);
-        let front = sides
-            .and_then(|s| s.front.as_ref())
-            .with_context(|| missing("front"))?;
-        let back = sides
-            .and_then(|s| s.back.as_ref())
-            .with_context(|| missing("back"))?;
-        template.config.q_format = front.resolve(&template.config.q_format);
-        template.config.a_format = back.resolve(&template.config.a_format);
+    for (template, name) in notetype.templates.iter_mut().zip(&shown.templates) {
+        let side = |front: bool| -> Result<(&Value, &Value)> {
+            let which = if front { "front" } else { "back" };
+            let file = parsed.sides.get(name).and_then(|s| s.get(front));
+            let file = file.with_context(|| format!("missing `## template: {name} ({which})`"))?;
+            // `render_notetype_file` always writes both sides.
+            Ok((file, shown.sides[name].get(front).unwrap()))
+        };
+        let (file, as_shown) = side(true)?;
+        template.config.q_format = file.pick(&as_shown.text, &template.config.q_format);
+        let (file, as_shown) = side(false)?;
+        template.config.a_format = file.pick(&as_shown.text, &template.config.a_format);
     }
-    notetype.config.css = parsed.css.resolve(&notetype.config.css);
+    notetype.config.css = parsed.css.pick(&shown.css.text, &notetype.config.css);
     Ok(())
 }
 
@@ -376,7 +390,7 @@ mod tests {
 
     /// Sets awkward names and template/CSS content directly through rslib
     /// (lines that look like section headers or escapes, a `---`, lone `\r`s
-    /// mid-line and at the end of a value or name, CRLF, trailing newlines,
+    /// mid-line and at the end of a value, CRLF, trailing newlines,
     /// a name ending in a space), then checks `show --full` → `edit` is a
     /// no-op.
     #[test]
@@ -388,7 +402,6 @@ mod tests {
             .unwrap())
         .clone();
         nt.name = "Vocab ".into();
-        nt.templates[0].name = "Card 1\r".into();
         nt.templates[0].config.q_format =
             "{{Front}}\n## not a header\n\\backslash\n---\n<br>\r<br>\n".into();
         nt.templates[0].config.a_format = "{{FrontSide}}\r\n<hr>\r\n{{Back}}\r".into();
@@ -403,11 +416,11 @@ mod tests {
         let shown = show_notetype(&mut col, &nt.name, true).unwrap();
         assert!(shown.contains("\n\\## not a header\n\\\\backslash\n\\---\n<br>\r<br>\n"));
         assert!(shown.contains("## fields\nFront\n\\\\Back\n"));
-        assert!(shown.contains("## templates\nCard 1\r\n\\## Card 2\n"));
+        assert!(shown.contains("## templates\nCard 1\n\\## Card 2\n"));
         // Without `--full`, names are printed as they are.
         let plain = show_notetype(&mut col, &nt.name, false).unwrap();
         assert!(plain.contains("## fields\nFront\n\\Back\n"));
-        assert!(plain.contains("## templates\nCard 1\r\n## Card 2\n"));
+        assert!(plain.contains("## templates\nCard 1\n## Card 2\n"));
         let mut reparsed = (*stored).clone();
         apply_notetype_file(&mut reparsed, &parse_notetype_file(&shown).unwrap()).unwrap();
         assert_eq!(reparsed, *stored);
@@ -475,16 +488,14 @@ mod tests {
     }
 
     #[test]
-    fn edit_accepts_a_file_an_editor_converted_to_crlf_or_gave_a_bom() {
+    fn edit_accepts_a_file_an_editor_converted_to_crlf() {
         let mut col = CollectionBuilder::default().build().unwrap();
         let shown = show_notetype(&mut col, "Basic", true).unwrap();
 
-        for text in [shown.replace('\n', "\r\n"), format!("\u{FEFF}{shown}")] {
-            assert_eq!(
-                edit_notetype(&mut col, "Basic", &text).unwrap(),
-                EditOutcome::Unchanged
-            );
-        }
+        assert_eq!(
+            edit_notetype(&mut col, "Basic", &shown.replace('\n', "\r\n")).unwrap(),
+            EditOutcome::Unchanged
+        );
     }
 
     /// rslib marks the schema modified (forcing a one-way full sync) when
@@ -543,10 +554,8 @@ mod tests {
         let err = edit_notetype(&mut col, "Basic (and reversed card)", &unknown).unwrap_err();
         assert!(err.to_string().contains("isn't in the"), "{err}");
 
-        for text in [shown.clone(), format!("\u{FEFF}{shown}")] {
-            let err = edit_notetype(&mut col, "Basic", &text).unwrap_err();
-            assert!(err.to_string().contains("file is for notetype"), "{err}");
-        }
+        let err = edit_notetype(&mut col, "Basic", &shown).unwrap_err();
+        assert!(err.to_string().contains("file is for notetype"), "{err}");
     }
 
     #[test]

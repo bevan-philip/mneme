@@ -246,11 +246,9 @@ fn move_cards(col: &mut Collection, note_id: NoteId, deck_id: DeckId) -> Result<
 }
 
 /// Insert a `# nid: N` line at the start of each newly added note's block,
-/// leaving every other byte of `text` untouched. Uses CRLF for the new line
-/// if the file already does. Pure.
+/// leaving every other byte of `text` untouched. Pure.
 pub fn write_note_ids(text: &str, notes: &[SyncNote], outcomes: &[SyncOutcome]) -> String {
     let spans = note_block_spans(text);
-    let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
     let mut inserts: Vec<(usize, i64)> = notes
         .iter()
         .zip(outcomes)
@@ -267,7 +265,7 @@ pub fn write_note_ids(text: &str, notes: &[SyncNote], outcomes: &[SyncOutcome]) 
     let mut copied = 0;
     for (at, note_id) in inserts {
         out.push_str(&text[copied..at]);
-        out.push_str(&format!("# nid: {note_id}{eol}"));
+        out.push_str(&format!("# nid: {note_id}\n"));
         copied = at;
     }
     out.push_str(&text[copied..]);
@@ -446,15 +444,13 @@ mod tests {
     }
 
     #[test]
-    fn write_back_preserves_crlf_and_every_other_byte() {
+    fn write_back_preserves_every_other_byte() {
         let mut col = col_with_deck("Spanish");
-        let crlf = TWO_NOTES.replace('\n', "\r\n");
-        let (_, written) = sync_text(&mut col, &crlf, false);
-        assert!(!written.replace("\r\n", "").contains('\n'));
+        let (_, written) = sync_text(&mut col, TWO_NOTES, false);
         let without_ids: String = written
-            .split_inclusive("\r\n")
+            .split_inclusive('\n')
             .filter(|line| !line.starts_with("# nid: "))
             .collect();
-        assert_eq!(without_ids, crlf);
+        assert_eq!(without_ids, TWO_NOTES);
     }
 }
