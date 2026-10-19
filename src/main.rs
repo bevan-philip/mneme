@@ -1,9 +1,11 @@
+mod ankiweb;
 mod backup;
 mod cards;
 mod cli;
 mod decks;
 mod notetypes;
 mod paths;
+mod prefs;
 mod profile;
 mod store;
 mod sync;
@@ -53,6 +55,21 @@ fn main() -> Result<()> {
                 collection_path.display(),
                 dest.display()
             );
+        }
+        Command::Sync => {
+            let profile_name = profile::resolve_profile(&anki2_root, requested_profile)?;
+            let collection_path = paths::collection_path(&anki2_root, &profile_name);
+            // Read the login before touching the collection, so a profile
+            // that was never logged in fails without a pointless backup.
+            let prefs = prefs::read_sync_prefs(&anki2_root, &profile_name)?;
+            let auth = prefs::sync_auth(&prefs)?;
+            let mut col = store::open_collection(&collection_path).map_err(open_error_to_anyhow)?;
+            backup::backup_collection(&mut col, &collection_path)?;
+            if let Some(user) = &prefs.sync_user {
+                println!("syncing as {user}");
+            }
+            let output = ankiweb::normal_sync(&mut col, auth)?;
+            print!("{}", ankiweb::describe_sync(&output)?);
         }
         Command::Decks { command } => {
             let profile_name = profile::resolve_profile(&anki2_root, requested_profile)?;

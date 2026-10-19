@@ -198,3 +198,22 @@
   a file that fails validation creates nothing. "Unchanged" is decided by
   comparing fields and tags before calling `update_note` (rslib also skips
   no-op updates itself, but doesn't report that back).
+- `sync` (`ankiweb.rs`) is rslib's `Collection::normal_sync`, nothing more:
+  a two-way merge in one transaction that rslib rolls back on error. When
+  AnkiWeb answers `FullSyncRequired`, rslib hasn't changed anything, and we
+  error rather than pick a direction (`full_upload`/`full_download` can
+  each discard the other side's changes). Media isn't synced. Building
+  needs `protoc` (for `anki_proto`), and HTTPS needs the `anki` crate's
+  `rustls` feature: rslib's reqwest is `default-features = false`, so
+  without it everything compiles but every request fails at runtime.
+- Credentials come from desktop's `prefs21.db` (`prefs.rs`), read-only:
+  each profile's row is a pickled dict, decoded with `serde-pickle`'s
+  `replace_unresolved_globals` because it can hold PyQt objects pickled via
+  `sip`. We never write it back (re-pickling would drop those values), so
+  a `new_endpoint` redirect from AnkiWeb is only reported; desktop gets the
+  same redirect on its own next sync. Key names mirror
+  `qt/aqt/profiles.py` and can change with any desktop release.
+- `ankiweb.rs`'s test runs a real normal sync against rslib's own
+  in-process sync server (`SimpleServer::make_server`), which reads its
+  user from the `SYNC_USER1` env var; that's the only test allowed to touch
+  the environment.

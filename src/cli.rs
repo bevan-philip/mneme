@@ -49,6 +49,10 @@ pub enum Command {
     },
     /// Copy the collection file to a scratch backup location
     Backup,
+    /// Two-way sync with AnkiWeb, using the login Anki desktop saved for
+    /// this profile. Backs up first. Doesn't sync media, and stops without
+    /// changing anything if AnkiWeb asks for a one-way full sync.
+    Sync,
 }
 
 #[derive(Subcommand)]
