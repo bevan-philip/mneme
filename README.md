@@ -10,3 +10,8 @@ A vibe-coded CLI for Anki. This README isn't LLM generated, though.
 ## Core ideas 
 - We're leveraging Anki's [rslib](https://github.com/ankitects/anki/tree/main/rslib), so all behaviour should be equivalent to Anki.
 - Anki will not be able to run simultaneously.
+
+## Installation
+```
+cargo install --path .
+```
