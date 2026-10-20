@@ -248,3 +248,11 @@
   so. It checks the name rslib will store (`"` stripped, NFC), not the one
   typed. The clone copies what desktop's `models.copy` does: fresh id,
   `original_id` cleared, everything else kept.
+- `cards suspend/unsuspend/bury/unbury/flag` (`card_state.rs`) act on
+  cards, not notes: in rslib these are card state (queue and flags), so a
+  note's cards are targeted with `--search nid:...`. They take card ids
+  (each checked to exist) or a non-empty `--search`. `unsuspend`/`unbury`
+  first narrow to `is:suspended`/`is:buried`, because rslib's
+  `unbury_or_unsuspend_cards` restores both states and would otherwise
+  unbury on `unsuspend` (and vice versa). `bury` is `BuryUser`, which is
+  what desktop's manual bury uses; rslib won't bury suspended cards.
