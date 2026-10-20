@@ -11,6 +11,9 @@
   `github.com/ankitects/anki`, pinned by `rev` in `Cargo.toml` (no crates.io
   release exists). Bumping the pin means re-checking `src/store.rs` and
   `src/decks.rs` against upstream, since rslib has no semver guarantees.
+- `rust-toolchain.toml` pins the compiler. When bumping rslib, keep it at or
+  above the pinned anki rev's own `rust-toolchain.toml`, since rslib may use
+  features newer than its declared `rust-version`.
 - rslib's own `Cargo.toml` uses `tokio.workspace = true` etc., resolved
   against the anki repo's workspace-level feature set. That set only
   includes what the *whole* anki workspace needs, not what our smaller
