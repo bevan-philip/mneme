@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-anki = { git = "https://github.com/ankitects/anki.git", rev = "4acb5329e6ad7944dad39cfcdae1519732654cf1", version = "0.0.0", features = ["rustls"] }
-anki_proto = { git = "https://github.com/ankitects/anki.git", rev = "4acb5329e6ad7944dad39cfcdae1519732654cf1", version = "0.0.0" }
+anki = { git = "https://github.com/ankitects/anki.git", rev = "b5df43b6a05d1270f33f6c2457eb937d8be9eda4", version = "0.0.0", features = ["rustls"] }
+anki_proto = { git = "https://github.com/ankitects/anki.git", rev = "b5df43b6a05d1270f33f6c2457eb937d8be9eda4", version = "0.0.0" }
 anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive"] }
 dirs = "7.0.0"
