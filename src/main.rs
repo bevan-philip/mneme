@@ -10,6 +10,8 @@ mod profile;
 mod store;
 mod sync;
 
+use std::io::Read as _;
+
 use anyhow::Context;
 use anyhow::Result;
 use clap::Parser;
@@ -93,8 +95,23 @@ fn main() -> Result<()> {
                 NotetypesCommand::List => {
                     print!("{}", notetypes::list_notetypes(&mut col)?);
                 }
-                NotetypesCommand::Show { name, full } => {
-                    print!("{}", notetypes::show_notetype(&mut col, &name, full)?);
+                NotetypesCommand::Show { name, full, output } => {
+                    emit(&notetypes::show_notetype(&mut col, &name, full)?, output)?;
+                }
+                NotetypesCommand::Edit { name, input } => {
+                    let text = read_text(&input)?;
+                    match notetypes::edit_notetype(&mut col, &name, &text)? {
+                        notetypes::EditOutcome::Updated => println!("updated notetype {name}"),
+                        notetypes::EditOutcome::Unchanged => {
+                            println!("notetype {name} unchanged")
+                        }
+                    }
+                }
+                NotetypesCommand::Add { name, from, input } => {
+                    let text = input.as_deref().map(read_text).transpose()?;
+                    let (id, name) =
+                        notetypes::add_notetype(&mut col, &name, &from, text.as_deref())?;
+                    println!("created notetype {name} ({id})");
                 }
             }
         }
@@ -109,6 +126,40 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+/// Read a text file the way an editor would show it: a BOM is honoured
+/// (UTF-8, or UTF-16 as Windows PowerShell 5.1 writes) and stripped, and
+/// CRLF becomes LF, so nothing past here deals with either.
+fn read_text(path: &std::path::Path) -> Result<String> {
+    let bytes =
+        std::fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+    decode_text(&bytes).with_context(|| format!("failed to read {}", path.display()))
+}
+
+fn decode_text(bytes: &[u8]) -> Result<String> {
+    let mut text = String::new();
+    // `utf8_passthru` keeps invalid UTF-8 an error instead of U+FFFD.
+    encoding_rs_io::DecodeReaderBytesBuilder::new()
+        .utf8_passthru(true)
+        .strip_bom(true)
+        .build(bytes)
+        .read_to_string(&mut text)?;
+    Ok(text.replace("\r\n", "\n"))
+}
+
+/// Print `text`, or write it to `output` byte for byte (shell redirection
+/// can re-encode it).
+fn emit(text: &str, output: Option<std::path::PathBuf>) -> Result<()> {
+    match output {
+        Some(path) => {
+            std::fs::write(&path, text)
+                .with_context(|| format!("failed to write {}", path.display()))?;
+            println!("wrote {}", path.display());
+        }
+        None => print!("{text}"),
+    }
+    Ok(())
+}
+
 fn run_cards_command(col: &mut anki::collection::Collection, command: CardsCommand) -> Result<()> {
     match command {
         CardsCommand::List { search } => {
@@ -116,19 +167,10 @@ fn run_cards_command(col: &mut anki::collection::Collection, command: CardsComma
             print!("{listing}");
         }
         CardsCommand::Show { card_id, output } => {
-            let text = cards::show(col, card_id)?;
-            match output {
-                Some(path) => {
-                    std::fs::write(&path, &text)
-                        .with_context(|| format!("failed to write {}", path.display()))?;
-                    println!("wrote {}", path.display());
-                }
-                None => print!("{text}"),
-            }
+            emit(&cards::show(col, card_id)?, output)?;
         }
         CardsCommand::Edit { card_id, input } => {
-            let text = std::fs::read_to_string(&input)
-                .with_context(|| format!("failed to read {}", input.display()))?;
+            let text = read_text(&input)?;
             cards::edit(col, card_id, &text)?;
             println!("updated card {card_id}");
         }
@@ -139,8 +181,7 @@ fn run_cards_command(col: &mut anki::collection::Collection, command: CardsComma
             input,
         } => {
             if let Some(path) = input {
-                let text = std::fs::read_to_string(&path)
-                    .with_context(|| format!("failed to read {}", path.display()))?;
+                let text = read_text(&path)?;
                 let parsed_notes = cards::parse_note_files_for_add(&text)?;
                 let outcomes = cards::add_many(col, &notetype, &deck, &parsed_notes)?;
 
@@ -178,8 +219,7 @@ fn run_cards_command(col: &mut anki::collection::Collection, command: CardsComma
             create_deck,
             no_write_ids,
         } => {
-            let text = std::fs::read_to_string(&input)
-                .with_context(|| format!("failed to read {}", input.display()))?;
+            let text = read_text(&input)?;
             let notes = sync::parse_sync_file(&text)?;
             let outcomes = sync::sync(col, &notes, create_deck)?;
 
@@ -231,5 +271,22 @@ fn open_error_to_anyhow(err: store::OpenError) -> anyhow::Error {
         store::OpenError::Other(err) => {
             anyhow::Error::from(err).context("failed to open collection")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decodes_boms_and_crlf_to_plain_lf_text() {
+        let utf16le: Vec<u8> = "\u{FEFF}a\r\nb\n"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        for bytes in [&b"a\r\nb\n"[..], b"\xEF\xBB\xBFa\nb\n", &utf16le] {
+            assert_eq!(decode_text(bytes).unwrap(), "a\nb\n");
+        }
+        assert!(decode_text(b"\xEF\xBB\xBFa\xFF").is_err());
     }
 }

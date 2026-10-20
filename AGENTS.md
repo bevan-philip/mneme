@@ -112,14 +112,13 @@
   notetype name, question preview) by replacing literal tabs with spaces —
   otherwise a field containing a tab produces a row with more than four
   columns, breaking anything parsing the listing.
-- `parse_note_file` deliberately still uses plain `str::lines()` (which
-  folds a `\r` immediately before `\n` into the terminator and drops it)
-  rather than a CRLF-preserving split: rslib's own field normalization
-  (`notes::invalid_char_for_field`) strips every ASCII control character
-  except `\n`/`\t` on every `add_note`/`update_note` regardless, so a
-  stored field can never actually contain a `\r` to lose. Pinned by
-  `rslib_normalizes_carriage_returns_out_of_fields` in `cards.rs` — don't
-  "fix" the line-splitting here to chase a CRLF that can't reach storage.
+- Input files are decoded once, in `main::read_text`: `encoding_rs_io`
+  honours and strips a BOM (UTF-8, or UTF-16 as Windows PowerShell 5.1
+  writes), and CRLF becomes LF, so no parser deals with either and
+  `cards sync` writes a CRLF file back as LF. Parsers split with
+  `str::lines()`. For note fields that loses nothing: rslib strips `\r`
+  from fields anyway (pinned by
+  `rslib_normalizes_carriage_returns_out_of_fields`).
 - `cards add --input` accepts a file holding several notes, separated by a
   line containing exactly `---` (`NOTE_DELIMITER`/`split_note_blocks` in
   `cards.rs`); a file with no such line is still just one note, so this is
@@ -189,7 +188,7 @@
   truncated file into silent data loss.
 - Write-back goes through `note_block_spans` (byte ranges into the original
   text) rather than re-rendering the file, so the only bytes that change
-  are the inserted `# nid:` lines; it matches the file's existing CRLF/LF.
+  are the inserted `# nid:` lines (once `read_text` has made it LF).
   `split_note_blocks` is now a thin wrapper over the same spans, so
   `cards add` and `cards sync` can't disagree about where blocks are.
 - `sync` keeps `add_many`'s two-phase shape (validate everything, then
@@ -217,3 +216,32 @@
   in-process sync server (`SimpleServer::make_server`), which reads its
   user from the `SYNC_USER1` env var; that's the only test allowed to touch
   the environment.
+- `notetypes edit`/`notetypes add --input` read `show --full` output with
+  the same `cards::split_sections`/`escape_field`/`trim_field` and fixed
+  two-newline boundary as note files. Unlike note fields, rslib keeps `\r`
+  in templates and CSS, which `str::lines()` can drop, so
+  `apply_notetype_file` compares each section with what `show` prints for
+  it, read back the same way, and keeps the stored bytes when they match:
+  only sections actually edited are rewritten, and only those lose a `\r`.
+  (A template *name* containing `\r`, which only the API can create, makes
+  `edit` error out.) The last section is the one an editor's "trim trailing
+  blank lines" can damage, so when its boundary is missing its stored
+  trailing newlines are kept. `--full` escapes the name lists; plain `show`
+  prints them verbatim.
+  Use `show --output` rather than shell redirection, which can re-encode
+  the file (Windows PowerShell 5.1 writes UTF-16).
+- Both commands require the file's field and template lists to match the
+  notetype exactly. In rslib, `update_notetype` calls `set_schema_modified`
+  (which forces a one-way full sync) only from `schemachange.rs`, when field
+  or template ordinals are added, removed or reordered, or the sort field
+  moves. Template HTML and CSS edits don't trigger it. `add_notetype` never
+  does: a new notetype goes up in a normal sync. Desktop's Clone
+  (`models.copy`) doesn't call `mark_schema` either. Pinned by
+  `template_and_css_edits_and_clones_leave_the_schema_unmodified`, which
+  reads `sync_meta().schema` and uses a template reorder as its positive
+  control.
+- `notetypes add` checks the name is free first, because rslib's
+  `ensure_notetype_name_unique` would otherwise append `+` without saying
+  so. It checks the name rslib will store (`"` stripped, NFC), not the one
+  typed. The clone copies what desktop's `models.copy` does: fresh id,
+  `original_id` cleared, everything else kept.

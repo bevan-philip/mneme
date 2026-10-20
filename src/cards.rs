@@ -168,7 +168,7 @@ const NOTE_DELIMITER: &str = "---";
 /// Escape a line that would otherwise be misread as a `## FieldName`
 /// section boundary, a note delimiter, or as an escaped line, when the
 /// field's raw content contains it verbatim.
-fn escape_field(value: &str) -> String {
+pub(crate) fn escape_field(value: &str) -> String {
     value
         .split('\n')
         .map(|line| {
@@ -184,7 +184,7 @@ fn escape_field(value: &str) -> String {
 
 /// Undo `escape_field`, one already-split line at a time (parsing already
 /// works line by line).
-fn unescape_field_line(line: &str) -> &str {
+pub(crate) fn unescape_field_line(line: &str) -> &str {
     line.strip_prefix('\\').unwrap_or(line)
 }
 
@@ -199,12 +199,9 @@ pub(crate) struct ParsedNoteFile {
 
 pub(crate) fn parse_note_file(text: &str) -> Result<ParsedNoteFile> {
     let mut parsed = ParsedNoteFile::default();
-    let mut lines = text.lines().peekable();
+    let (preamble, sections) = split_sections(text.lines());
 
-    while let Some(line) = lines.peek() {
-        if line.starts_with("## ") {
-            break;
-        }
+    for line in preamble {
         if let Some(rest) = line.strip_prefix("# notetype:") {
             parsed.notetype = Some(rest.trim().to_string());
         } else if let Some(rest) = line.strip_prefix("# deck:") {
@@ -218,27 +215,12 @@ pub(crate) fn parse_note_file(text: &str) -> Result<ParsedNoteFile> {
         } else if let Some(rest) = line.strip_prefix("# tags:") {
             parsed.tags = Some(rest.split_whitespace().map(str::to_string).collect());
         }
-        lines.next();
     }
 
-    let mut current: Option<(String, String)> = None;
-    for line in lines {
-        if let Some(name) = line.strip_prefix("## ") {
-            if let Some((name, content)) = current.take() {
-                parsed.fields.push((name, trim_field(content)));
-            }
-            current = Some((name.trim().to_string(), String::new()));
-        } else if let Some((_, content)) = current.as_mut() {
-            content.push_str(unescape_field_line(line));
-            content.push('\n');
-        } else {
-            bail!("expected a `## FieldName` heading, found: {line}");
-        }
-    }
-    if let Some((name, content)) = current.take() {
-        parsed.fields.push((name, trim_field(content)));
-    }
-
+    parsed.fields = sections
+        .into_iter()
+        .map(|(name, content)| (name.trim().to_string(), trim_field(content)))
+        .collect();
     if parsed.fields.is_empty() {
         bail!("no `## FieldName` sections found");
     }
@@ -246,12 +228,33 @@ pub(crate) fn parse_note_file(text: &str) -> Result<ParsedNoteFile> {
     Ok(parsed)
 }
 
+/// Split a file into its preamble (the lines before the first `## `
+/// heading) and its sections, each a heading (after `## `) and its
+/// unescaped content with every line's newline kept, for `trim_field`.
+pub(crate) fn split_sections<'a>(
+    lines: impl Iterator<Item = &'a str>,
+) -> (Vec<&'a str>, Vec<(&'a str, String)>) {
+    let mut lines = lines.peekable();
+    let is_heading = |line: &&str| line.starts_with("## ");
+    let preamble = std::iter::from_fn(|| lines.next_if(|l| !is_heading(l))).collect();
+    let mut sections = vec![];
+    while let Some(heading) = lines.next().and_then(|l| l.strip_prefix("## ")) {
+        let mut content = String::new();
+        while let Some(line) = lines.next_if(|l| !is_heading(l)) {
+            content.push_str(unescape_field_line(line));
+            content.push('\n');
+        }
+        sections.push((heading, content));
+    }
+    (preamble, sections)
+}
+
 /// Strip exactly the two-newline boundary `render_note_file` always adds
 /// after a field's value, leaving any trailing newlines that were actually
 /// part of the value untouched. A hand-edited file that omits the trailing
 /// blank line (e.g. no blank line before EOF) just has fewer than two to
 /// strip, which is fine.
-fn trim_field(mut content: String) -> String {
+pub(crate) fn trim_field(mut content: String) -> String {
     for _ in 0..2 {
         if content.ends_with('\n') {
             content.pop();
@@ -329,18 +332,15 @@ fn split_note_blocks(text: &str) -> Vec<&str> {
 /// The byte ranges of `split_note_blocks`'s blocks within `text`, excluding
 /// the delimiter lines themselves. Kept as ranges into the original text
 /// (rather than re-joined lines) so `cards sync` can write note ids back
-/// into the file at a block's exact position, leaving every other byte —
-/// including CRLF line endings — untouched.
+/// into the file at a block's exact position, leaving every other byte
+/// untouched.
 pub(crate) fn note_block_spans(text: &str) -> Vec<std::ops::Range<usize>> {
     let mut spans = Vec::new();
     let mut block_start = 0;
     let mut offset = 0;
     let mut previous_blank = true;
     for raw_line in text.split_inclusive('\n') {
-        let line = raw_line
-            .strip_suffix('\n')
-            .map(|l| l.strip_suffix('\r').unwrap_or(l))
-            .unwrap_or(raw_line);
+        let line = raw_line.strip_suffix('\n').unwrap_or(raw_line);
         if line == NOTE_DELIMITER && previous_blank {
             spans.push(block_start..offset);
             block_start = offset + raw_line.len();
