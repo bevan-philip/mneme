@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
 
@@ -184,4 +185,34 @@ pub enum CardsCommand {
         #[arg(long)]
         no_write_ids: bool,
     },
+    /// Suspend cards, like Anki's browser
+    Suspend(CardSelection),
+    /// Unsuspend suspended cards (buried cards stay buried)
+    Unsuspend(CardSelection),
+    /// Bury cards until the next day, like Anki's manual bury (suspended
+    /// cards are left suspended)
+    Bury(CardSelection),
+    /// Unbury buried cards (suspended cards stay suspended)
+    Unbury(CardSelection),
+    /// Set or clear cards' flag
+    Flag {
+        /// 0-7, or a flag name: none, red, orange, green, blue, pink,
+        /// turquoise, purple (0/none clears the flag)
+        flag: String,
+        #[command(flatten)]
+        cards: CardSelection,
+    },
+}
+
+/// Which cards a state change applies to. To act on every card of a note,
+/// use `--search nid:NOTE_ID`.
+#[derive(Args)]
+pub struct CardSelection {
+    /// Card ids, as printed by `cards list`
+    #[arg(required_unless_present = "search")]
+    pub card_ids: Vec<i64>,
+    /// Act on every card matching this Anki search query instead (e.g.
+    /// `deck:Spanish tag:leech`)
+    #[arg(long, conflicts_with = "card_ids")]
+    pub search: Option<String>,
 }

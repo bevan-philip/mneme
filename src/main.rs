@@ -1,5 +1,6 @@
 mod ankiweb;
 mod backup;
+mod card_state;
 mod cards;
 mod cli;
 mod decks;
@@ -259,7 +260,32 @@ fn run_cards_command(col: &mut anki::collection::Collection, command: CardsComma
                 anyhow::bail!("{failed} of {} note(s) failed to sync", outcomes.len());
             }
         }
+        CardsCommand::Suspend(cards) => {
+            change_card_state(col, &cards, card_state::StateChange::Suspend)?
+        }
+        CardsCommand::Unsuspend(cards) => {
+            change_card_state(col, &cards, card_state::StateChange::Unsuspend)?
+        }
+        CardsCommand::Bury(cards) => change_card_state(col, &cards, card_state::StateChange::Bury)?,
+        CardsCommand::Unbury(cards) => {
+            change_card_state(col, &cards, card_state::StateChange::Unbury)?
+        }
+        CardsCommand::Flag { flag, cards } => {
+            let flag = card_state::parse_flag(&flag)?;
+            change_card_state(col, &cards, card_state::StateChange::Flag(flag))?;
+        }
     }
+    Ok(())
+}
+
+fn change_card_state(
+    col: &mut anki::collection::Collection,
+    cards: &cli::CardSelection,
+    change: card_state::StateChange,
+) -> Result<()> {
+    let card_ids = card_state::resolve_cards(col, &cards.card_ids, cards.search.as_deref())?;
+    let changed = card_state::apply(col, &card_ids, change)?;
+    println!("{}", card_state::describe(change, changed, card_ids.len()));
     Ok(())
 }
 
