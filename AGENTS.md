@@ -283,3 +283,9 @@
   that doesn't exist yet is `Card::new` in the block's `# deck:` (else
   Default, as `Note.ephemeral_card` uses); a `# nid:` block reuses that
   note's existing cards, so `{{CardID}}`/`{{Deck}}` match what Anki shows.
+- `cards render --templates` goes through `notetypes::preview_notetype`,
+  which is `edit` minus the save (same `apply_notetype_file`, so the same
+  field/template-list rules), then passes the edited copy to rslib's
+  public `render_card`; `render_uncommitted_card` would re-fetch the
+  stored notetype. Cards of any other notetype are an error, not rendered
+  unedited.

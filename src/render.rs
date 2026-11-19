@@ -54,7 +54,7 @@ pub struct PageOptions<'a> {
 pub fn render_cards(
     col: &mut Collection,
     card_ids: &[i64],
-    _templates: Option<&Notetype>,
+    templates: Option<&Notetype>,
     options: &PageOptions,
 ) -> Result<Vec<RenderedCard>> {
     let mut rendered = Vec::with_capacity(card_ids.len());
@@ -70,12 +70,13 @@ pub fn render_cards(
         let notetype = col
             .get_notetype(note.notetype_id)?
             .context("note references a missing notetype")?;
+        let notetype = with_templates(&notetype, templates, &format!("card {cid}"))?;
         rendered.push(render_one(
             col,
             cid.to_string(),
             &note,
             &card,
-            &notetype,
+            notetype,
             options,
         )?);
     }
@@ -95,7 +96,7 @@ pub fn render_cards(
 pub fn render_notes(
     col: &mut Collection,
     text: &str,
-    _templates: Option<&Notetype>,
+    templates: Option<&Notetype>,
     options: &PageOptions,
 ) -> Result<Vec<RenderedCard>> {
     let mut first: Option<ParsedNoteFile> = None;
@@ -119,6 +120,7 @@ pub fn render_notes(
         let notetype = col.get_notetype_by_name(notetype_name)?.with_context(|| {
             format!("note {n}: no such notetype: {notetype_name} (see `notetypes list`)")
         })?;
+        let notetype = with_templates(&notetype, templates, &format!("note {n}"))?;
 
         let (mut note, existing_cards) = match parsed.note_id {
             Some(id) => {
@@ -131,9 +133,9 @@ pub fn render_notes(
                 }
                 (note, col.storage.all_cards_of_note(NoteId(id))?)
             }
-            None => (Note::new(&notetype), vec![]),
+            None => (Note::new(notetype), vec![]),
         };
-        set_fields(&mut note, &notetype, &parsed.fields).with_context(|| format!("note {n}"))?;
+        set_fields(&mut note, notetype, &parsed.fields).with_context(|| format!("note {n}"))?;
         if let Some(tags) = &parsed.tags {
             note.tags = tags.clone();
         }
@@ -144,14 +146,14 @@ pub fn render_notes(
         }
         .unwrap_or(DeckId(1));
 
-        for ord in card_ords(&note, &notetype) {
+        for ord in card_ords(&note, notetype) {
             let card = existing_cards
                 .iter()
                 .find(|card| card.template_idx() == ord)
                 .cloned()
                 .unwrap_or_else(|| Card::new(note.id, ord, deck_id, 0));
             let name = format!("note{n}-card{}", ord + 1);
-            rendered.push(render_one(col, name, &note, &card, &notetype, options)?);
+            rendered.push(render_one(col, name, &note, &card, notetype, options)?);
         }
         first.get_or_insert(parsed);
     }
@@ -159,6 +161,25 @@ pub fn render_notes(
         bail!("no `## FieldName` sections found");
     }
     Ok(rendered)
+}
+
+/// `templates` (the `--templates` preview of a notetype) if given, else the
+/// stored notetype. A card of another notetype is an error rather than
+/// silently rendered without the edit being previewed.
+fn with_templates<'a>(
+    stored: &'a Notetype,
+    templates: Option<&'a Notetype>,
+    what: &str,
+) -> Result<&'a Notetype> {
+    match templates {
+        None => Ok(stored),
+        Some(edited) if edited.id == stored.id => Ok(edited),
+        Some(edited) => bail!(
+            "{what} uses notetype `{}`, but --templates is for `{}`",
+            stored.name,
+            edited.name
+        ),
+    }
 }
 
 /// The card ordinals desktop's card layout screen offers for `note`.
@@ -528,6 +549,48 @@ mod tests {
         assert!(rendered[0].warnings.is_empty());
         assert_eq!(rendered[1].warnings.len(), 1);
         assert!(rendered[1].warnings[0].contains("front is empty"));
+    }
+
+    fn edited_basic(col: &mut Collection) -> Notetype {
+        let shown = crate::notetypes::show_notetype(col, "Basic", true).unwrap();
+        let edited = shown
+            .replace(
+                "## template: Card 1 (front)\n{{Front}}",
+                "## template: Card 1 (front)\n<i>{{Front}}</i>",
+            )
+            .replace(".card {", ".card { border: 1px solid red;");
+        crate::notetypes::preview_notetype(col, &edited).unwrap()
+    }
+
+    #[test]
+    fn renders_through_edited_templates_without_saving_them() {
+        let mut col = CollectionBuilder::default().build().unwrap();
+        let cards = add_basic(&mut col, "Basic", "hola", "hello");
+        let edited = edited_basic(&mut col);
+
+        let rendered = &render_cards(&mut col, &cards, Some(&edited), &options()).unwrap()[0];
+
+        assert!(qa(&rendered.front).ends_with("</style><i>hola</i>"));
+        assert!(qa(&rendered.back).contains("</style><i>hola</i>\n\n<hr id=answer>"));
+        assert!(rendered.front.contains(".card { border: 1px solid red;"));
+        let stored = col.get_notetype_by_name("Basic").unwrap().unwrap();
+        assert_eq!(stored.templates[0].config.q_format, "{{Front}}");
+
+        let text = "# notetype: Basic\n\n## Front\nnew\n\n## Back\nb\n";
+        let rendered = &render_notes(&mut col, text, Some(&edited), &options()).unwrap()[0];
+        assert!(qa(&rendered.front).ends_with("</style><i>new</i>"));
+    }
+
+    #[test]
+    fn rejects_templates_for_another_notetype() {
+        let mut col = CollectionBuilder::default().build().unwrap();
+        let cards = add_basic(&mut col, "Basic (and reversed card)", "hola", "hello");
+        let edited = edited_basic(&mut col);
+
+        let err = render_cards(&mut col, &cards, Some(&edited), &options())
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("--templates is for `Basic`"));
     }
 
     #[test]

@@ -307,8 +307,15 @@ pub fn edit_notetype(col: &mut Collection, name: &str, text: &str) -> Result<Edi
 /// The notetype a `show --full` file is for (its `# notetype:` header), with
 /// the file's templates and CSS applied under the same rules as `edit`, but
 /// not saved: for previewing an edit with `cards render --templates`.
-pub fn preview_notetype(_col: &mut Collection, _text: &str) -> Result<Notetype> {
-    bail!("previewing a notetype file is not implemented yet")
+pub fn preview_notetype(col: &mut Collection, text: &str) -> Result<Notetype> {
+    let parsed = parse_notetype_file(text)?;
+    let name = parsed
+        .notetype
+        .as_deref()
+        .context("no `# notetype:` header (see `notetypes show --full`)")?;
+    let mut notetype = (*notetype_by_name(col, name)?).clone();
+    apply_notetype_file(&mut notetype, &parsed)?;
+    Ok(notetype)
 }
 
 /// Clone notetype `from` as `name`, the way desktop's Manage Note Types →
