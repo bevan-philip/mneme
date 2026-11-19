@@ -185,6 +185,35 @@ pub enum CardsCommand {
         #[arg(long)]
         no_write_ids: bool,
     },
+    /// Render cards to HTML the way Anki's card previewer shows them: one
+    /// `<name>-front.html` and one `<name>-back.html` per card, each a
+    /// standalone page with the notetype's CSS, media linked from the
+    /// collection's media folder, and play buttons for audio. Nothing in the
+    /// collection is changed. Pages with math (`\(` or `\[`) typeset it with
+    /// a bundled MathJax, written to `<output-dir>/mathjax/`
+    Render {
+        /// Card ids, as printed by `cards list`
+        #[arg(required_unless_present = "input")]
+        card_ids: Vec<i64>,
+        /// Render the cards the notes in this note file (as `cards show`,
+        /// `cards add --input` or `cards sync` read) would have, without
+        /// adding or changing anything. Blocks with a `# nid:` render as
+        /// that note would after the edit
+        #[arg(long, conflicts_with = "card_ids")]
+        input: Option<PathBuf>,
+        /// Render through the templates and CSS in this file (`notetypes
+        /// show --full` format, same rules as `notetypes edit`) instead of
+        /// the stored ones, without changing the notetype
+        #[arg(long)]
+        templates: Option<PathBuf>,
+        /// Directory to write the HTML files into, created if missing
+        #[arg(long)]
+        output_dir: PathBuf,
+        /// Render as desktop's dark theme shows cards: the `nightMode`
+        /// classes card CSS can style, and Anki's dark colours
+        #[arg(long)]
+        night_mode: bool,
+    },
     /// Suspend cards, like Anki's browser
     Suspend(CardSelection),
     /// Unsuspend suspended cards (buried cards stay buried)

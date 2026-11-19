@@ -256,3 +256,46 @@
   `unbury_or_unsuspend_cards` restores both states and would otherwise
   unbury on `unsuspend` (and vice versa). `bury` is `BuryUser`, which is
   what desktop's manual bury uses; rslib won't bury suspended cards.
+- `cards render` (`render.rs`) copies desktop's browser previewer
+  (`aqt/browser/previewer.py`), step for step: rslib's `render_card`, then
+  the `CardRenderingService` calls pylib makes (`extract_av_tags`,
+  `extract_latex`, `encode_iri_paths`), then the previewer's own string
+  edits (`[[type:]]` removed, play buttons, `HideAudioPlayButtons`) and
+  the reviewer page around `#qa` (body classes, the card-relevant part of
+  `reviewer.scss`). Desktop's Python hooks are re-implemented here rather
+  than guessed at, so compare against those files when bumping the pin.
+  Media resolve through a `<base>` pointing at the media folder, so every
+  other link a page makes (MathJax) has to be an absolute `file:` URL.
+  MathJax is only loaded when desktop's `mathjaxRegex` matches, as its
+  reviewer does; LaTeX images that don't exist yet are a warning, since
+  generating them needs desktop's external `latex` toolchain.
+- `vendor/mathjax/` is the `es5/` build of the npm `mathjax` version
+  Anki's own `yarn.lock` resolves (3.2.2), cut down to `tex-chtml-full.js`
+  and its fonts; `vendor.rs` embeds it with `include_bytes!` and
+  `cards render` writes it beside the pages that need it. If an anki bump
+  changes MathJax's version, re-vendor and update `vendor.rs`'s file list
+  (`embeds_every_font_the_script_references` catches a missing font).
+- `cards render --input` renders the cards desktop's card layout screen
+  offers for a note (`aqt/clayout.py`), not rslib's card generation
+  (`CardGenContext` is crate-private): every template of a normal
+  notetype, each cloze number of a cloze note (cloze 1 if none). A card
+  rslib reports as empty gets a warning instead of being skipped. A card
+  that doesn't exist yet is `Card::new` in the block's `# deck:` (else
+  Default, as `Note.ephemeral_card` uses); a `# nid:` block reuses that
+  note's existing cards, so `{{CardID}}`/`{{Deck}}` match what Anki shows.
+- `cards render --templates` goes through `notetypes::preview_notetype`,
+  which is `edit` minus the save (same `apply_notetype_file`, so the same
+  field/template-list rules), then passes the edited copy to rslib's
+  public `render_card`; `render_uncommitted_card` would re-fetch the
+  stored notetype. Cards of any other notetype are an error, not rendered
+  unedited.
+- `--night-mode` reproduces what desktop's dark theme changes for a card:
+  `nightMode night_mode` body classes (card CSS keys off them), the
+  webview's `night-mode` root class, and `vendor/anki/root-vars.css`,
+  Anki's CSS variables in both themes, which every page includes as
+  desktop's webviews do. That file is `ts/lib/sass/_root-vars.scss` from
+  the pinned anki rev compiled verbatim (`npx sass --no-source-map
+  ts/lib/sass/_root-vars.scss out.css` in an anki checkout, `sass` below
+  1.103 per anki's `package.json`); recompile it when bumping the pin.
+  Desktop's `macos-dark-mode` class is left out: it depends on the OS
+  theme, not Anki's.

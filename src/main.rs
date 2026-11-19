@@ -8,8 +8,10 @@ mod notetypes;
 mod paths;
 mod prefs;
 mod profile;
+mod render;
 mod store;
 mod sync;
+mod vendor;
 
 use std::io::Read as _;
 
@@ -120,7 +122,7 @@ fn main() -> Result<()> {
             let profile_name = profile::resolve_profile(&anki2_root, requested_profile)?;
             let collection_path = paths::collection_path(&anki2_root, &profile_name);
             let mut col = store::open_collection(&collection_path).map_err(open_error_to_anyhow)?;
-            run_cards_command(&mut col, command)?;
+            run_cards_command(&mut col, &collection_path, command)?;
         }
     }
 
@@ -161,7 +163,11 @@ fn emit(text: &str, output: Option<std::path::PathBuf>) -> Result<()> {
     Ok(())
 }
 
-fn run_cards_command(col: &mut anki::collection::Collection, command: CardsCommand) -> Result<()> {
+fn run_cards_command(
+    col: &mut anki::collection::Collection,
+    collection_path: &std::path::Path,
+    command: CardsCommand,
+) -> Result<()> {
     match command {
         CardsCommand::List { search } => {
             let listing = cards::list_cards(col, search.as_deref().unwrap_or(""))?;
@@ -258,6 +264,49 @@ fn run_cards_command(col: &mut anki::collection::Collection, command: CardsComma
             }
             if failed > 0 {
                 anyhow::bail!("{failed} of {} note(s) failed to sync", outcomes.len());
+            }
+        }
+        CardsCommand::Render {
+            card_ids,
+            input,
+            templates,
+            output_dir,
+            night_mode,
+        } => {
+            let templates = templates
+                .as_deref()
+                .map(|path| notetypes::preview_notetype(col, &read_text(path)?))
+                .transpose()?;
+            let media_dir = std::path::absolute(paths::media_folder(collection_path))?;
+            let output_dir = std::path::absolute(&output_dir)?;
+            let mathjax_dir = output_dir.join("mathjax");
+            let options = render::PageOptions {
+                media_dir: &media_dir,
+                mathjax_dir: &mathjax_dir,
+                night_mode,
+            };
+            let rendered = match input {
+                Some(path) => {
+                    render::render_notes(col, &read_text(&path)?, templates.as_ref(), &options)?
+                }
+                None => render::render_cards(col, &card_ids, templates.as_ref(), &options)?,
+            };
+            std::fs::create_dir_all(&output_dir)
+                .with_context(|| format!("failed to create {}", output_dir.display()))?;
+            for card in &rendered {
+                for warning in &card.warnings {
+                    eprintln!("warning: {}: {warning}", card.name);
+                }
+                for (side, html) in [("front", &card.front), ("back", &card.back)] {
+                    let path = output_dir.join(format!("{}-{side}.html", card.name));
+                    std::fs::write(&path, html)
+                        .with_context(|| format!("failed to write {}", path.display()))?;
+                    println!("wrote {}", path.display());
+                }
+            }
+            if rendered.iter().any(|card| card.needs_mathjax) {
+                vendor::write_mathjax(&mathjax_dir)?;
+                println!("wrote {}", mathjax_dir.display());
             }
         }
         CardsCommand::Suspend(cards) => {
