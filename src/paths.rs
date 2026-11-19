@@ -17,6 +17,12 @@ pub fn collection_path(anki2_root: &Path, profile: &OsStr) -> PathBuf {
     anki2_root.join(profile).join("collection.anki2")
 }
 
+/// The media folder desktop keeps beside a collection, as rslib's
+/// `with_desktop_media_paths` derives it.
+pub fn media_folder(collection_path: &Path) -> PathBuf {
+    collection_path.with_extension("media")
+}
+
 /// Whether `name` is exactly one normal path component: no separators, and
 /// not `.`, `..`, or absolute. `--profile` is documented as a profile name,
 /// not a path, so anything else (`../elsewhere`, an absolute path) should
