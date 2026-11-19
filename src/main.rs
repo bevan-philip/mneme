@@ -11,6 +11,7 @@ mod profile;
 mod render;
 mod store;
 mod sync;
+mod vendor;
 
 use std::io::Read as _;
 
@@ -276,15 +277,21 @@ fn run_cards_command(
                 .map(|path| notetypes::preview_notetype(col, &read_text(path)?))
                 .transpose()?;
             let media_dir = std::path::absolute(paths::media_folder(collection_path))?;
+            let output_dir = std::path::absolute(&output_dir)?;
+            let mathjax_dir = output_dir.join("mathjax");
+            let options = render::PageOptions {
+                media_dir: &media_dir,
+                mathjax_dir: &mathjax_dir,
+            };
             let rendered = match input {
                 Some(path) => {
-                    render::render_notes(col, &read_text(&path)?, templates.as_ref(), &media_dir)?
+                    render::render_notes(col, &read_text(&path)?, templates.as_ref(), &options)?
                 }
-                None => render::render_cards(col, &card_ids, templates.as_ref(), &media_dir)?,
+                None => render::render_cards(col, &card_ids, templates.as_ref(), &options)?,
             };
             std::fs::create_dir_all(&output_dir)
                 .with_context(|| format!("failed to create {}", output_dir.display()))?;
-            for card in rendered {
+            for card in &rendered {
                 for warning in &card.warnings {
                     eprintln!("warning: {}: {warning}", card.name);
                 }
@@ -294,6 +301,10 @@ fn run_cards_command(
                         .with_context(|| format!("failed to write {}", path.display()))?;
                     println!("wrote {}", path.display());
                 }
+            }
+            if rendered.iter().any(|card| card.needs_mathjax) {
+                vendor::write_mathjax(&mathjax_dir)?;
+                println!("wrote {}", mathjax_dir.display());
             }
         }
         CardsCommand::Suspend(cards) => {

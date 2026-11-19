@@ -256,3 +256,22 @@
   `unbury_or_unsuspend_cards` restores both states and would otherwise
   unbury on `unsuspend` (and vice versa). `bury` is `BuryUser`, which is
   what desktop's manual bury uses; rslib won't bury suspended cards.
+- `cards render` (`render.rs`) copies desktop's browser previewer
+  (`aqt/browser/previewer.py`), step for step: rslib's `render_card`, then
+  the `CardRenderingService` calls pylib makes (`extract_av_tags`,
+  `extract_latex`, `encode_iri_paths`), then the previewer's own string
+  edits (`[[type:]]` removed, play buttons, `HideAudioPlayButtons`) and
+  the reviewer page around `#qa` (body classes, the card-relevant part of
+  `reviewer.scss`). Desktop's Python hooks are re-implemented here rather
+  than guessed at, so compare against those files when bumping the pin.
+  Media resolve through a `<base>` pointing at the media folder, so every
+  other link a page makes (MathJax) has to be an absolute `file:` URL.
+  MathJax is only loaded when desktop's `mathjaxRegex` matches, as its
+  reviewer does; LaTeX images that don't exist yet are a warning, since
+  generating them needs desktop's external `latex` toolchain.
+- `vendor/mathjax/` is the `es5/` build of the npm `mathjax` version
+  Anki's own `yarn.lock` resolves (3.2.2), cut down to `tex-chtml-full.js`
+  and its fonts; `vendor.rs` embeds it with `include_bytes!` and
+  `cards render` writes it beside the pages that need it. If an anki bump
+  changes MathJax's version, re-vendor and update `vendor.rs`'s file list
+  (`embeds_every_font_the_script_references` catches a missing font).
