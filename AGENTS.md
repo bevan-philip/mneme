@@ -275,3 +275,11 @@
   `cards render` writes it beside the pages that need it. If an anki bump
   changes MathJax's version, re-vendor and update `vendor.rs`'s file list
   (`embeds_every_font_the_script_references` catches a missing font).
+- `cards render --input` renders the cards desktop's card layout screen
+  offers for a note (`aqt/clayout.py`), not rslib's card generation
+  (`CardGenContext` is crate-private): every template of a normal
+  notetype, each cloze number of a cloze note (cloze 1 if none). A card
+  rslib reports as empty gets a warning instead of being skipped. A card
+  that doesn't exist yet is `Card::new` in the block's `# deck:` (else
+  Default, as `Note.ephemeral_card` uses); a `# nid:` block reuses that
+  note's existing cards, so `{{CardID}}`/`{{Deck}}` match what Anki shows.

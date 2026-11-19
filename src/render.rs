@@ -3,9 +3,12 @@ use std::sync::LazyLock;
 
 use anki::card::Card;
 use anki::card::CardId;
+use anki::cloze::cloze_number_in_fields;
 use anki::collection::Collection;
 use anki::config::BoolKey;
+use anki::decks::DeckId;
 use anki::notes::Note;
+use anki::notes::NoteId;
 use anki::notetype::Notetype;
 use anki::notetype::NotetypeKind;
 use anki::services::CardRenderingService as _;
@@ -15,6 +18,11 @@ use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
 use regex::Regex;
+
+use crate::cards::ParsedNoteFile;
+use crate::cards::note_block_spans;
+use crate::cards::parse_note_file;
+use crate::cards::set_fields;
 
 use crate::vendor;
 
@@ -75,14 +83,102 @@ pub fn render_cards(
 }
 
 /// Render every card the notes in a note file would have, without adding
-/// or changing anything.
+/// or changing anything. Headers resolve as in `cards sync`: a block's own
+/// `# notetype:`/`# deck:`/`# tags:` win, anything omitted comes from the
+/// first block. A block with a `# nid:` renders as that note would with the
+/// block applied, through its existing cards where it has them.
+///
+/// The cards rendered are the ones desktop's card layout screen offers for
+/// a note: every template of a normal notetype (an empty front renders
+/// rslib's empty-card message, and is warned about), and for a cloze
+/// notetype each cloze number in the note, or cloze 1 if there are none.
 pub fn render_notes(
-    _col: &mut Collection,
-    _text: &str,
+    col: &mut Collection,
+    text: &str,
     _templates: Option<&Notetype>,
-    _options: &PageOptions,
+    options: &PageOptions,
 ) -> Result<Vec<RenderedCard>> {
-    bail!("rendering a note file is not implemented yet")
+    let mut first: Option<ParsedNoteFile> = None;
+    let mut rendered = vec![];
+    let blocks = note_block_spans(text)
+        .into_iter()
+        .map(|span| &text[span])
+        .filter(|block| !block.trim().is_empty());
+    for (idx, block) in blocks.enumerate() {
+        let n = idx + 1;
+        let mut parsed = parse_note_file(block).with_context(|| format!("note {n}"))?;
+        if let Some(first) = &first {
+            parsed.notetype = parsed.notetype.or_else(|| first.notetype.clone());
+            parsed.deck = parsed.deck.or_else(|| first.deck.clone());
+            parsed.tags = parsed.tags.or_else(|| first.tags.clone());
+        }
+        let notetype_name = parsed
+            .notetype
+            .as_deref()
+            .with_context(|| format!("note {n}: no `# notetype:` header"))?;
+        let notetype = col.get_notetype_by_name(notetype_name)?.with_context(|| {
+            format!("note {n}: no such notetype: {notetype_name} (see `notetypes list`)")
+        })?;
+
+        let (mut note, existing_cards) = match parsed.note_id {
+            Some(id) => {
+                let note = col
+                    .storage
+                    .get_note(NoteId(id))?
+                    .with_context(|| format!("note {n}: no such note: {id}"))?;
+                if note.notetype_id != notetype.id {
+                    bail!("note {n}: note {id} is not a `{}` note", notetype.name);
+                }
+                (note, col.storage.all_cards_of_note(NoteId(id))?)
+            }
+            None => (Note::new(&notetype), vec![]),
+        };
+        set_fields(&mut note, &notetype, &parsed.fields).with_context(|| format!("note {n}"))?;
+        if let Some(tags) = &parsed.tags {
+            note.tags = tags.clone();
+        }
+        // Desktop previews a card that doesn't exist yet in the default deck.
+        let deck_id = match &parsed.deck {
+            Some(deck) => col.get_deck_id(deck)?,
+            None => None,
+        }
+        .unwrap_or(DeckId(1));
+
+        for ord in card_ords(&note, &notetype) {
+            let card = existing_cards
+                .iter()
+                .find(|card| card.template_idx() == ord)
+                .cloned()
+                .unwrap_or_else(|| Card::new(note.id, ord, deck_id, 0));
+            let name = format!("note{n}-card{}", ord + 1);
+            rendered.push(render_one(col, name, &note, &card, &notetype, options)?);
+        }
+        first.get_or_insert(parsed);
+    }
+    if rendered.is_empty() {
+        bail!("no `## FieldName` sections found");
+    }
+    Ok(rendered)
+}
+
+/// The card ordinals desktop's card layout screen offers for `note`.
+fn card_ords(note: &Note, notetype: &Notetype) -> Vec<u16> {
+    match notetype.config.kind() {
+        NotetypeKind::Normal => (0..notetype.templates.len() as u16).collect(),
+        NotetypeKind::Cloze => {
+            let mut ords: Vec<u16> = cloze_number_in_fields(note.fields())
+                .into_iter()
+                // rslib's card generation caps cloze cards at 500.
+                .map(|number| number.saturating_sub(1).min(499))
+                .collect();
+            ords.sort_unstable();
+            ords.dedup();
+            if ords.is_empty() {
+                ords.push(0);
+            }
+            ords
+        }
+    }
 }
 
 /// Render one card the way desktop's browser previewer does
@@ -108,6 +204,13 @@ fn render_one(
     let hide_play_buttons = col.get_config_bool(BoolKey::HideAudioPlayButtons);
 
     let mut warnings = vec![];
+    if output.is_empty {
+        warnings.push(
+            "the front is empty, so Anki shows an empty-card message instead \
+             (and doesn't create this card for a new note)"
+                .to_string(),
+        );
+    }
     let mut side = |text: String, question_side: bool| -> Result<(String, bool)> {
         let text = col
             .extract_av_tags(ExtractAvTagsRequest {
@@ -332,6 +435,99 @@ mod tests {
         assert!(rendered[1].front.contains("<body class=\"card card2 "));
         assert!(qa(&rendered[1].front).ends_with("</style><b>hello</b>"));
         assert!(first.warnings.is_empty());
+    }
+
+    #[test]
+    fn renders_every_template_of_a_new_note_without_adding_it() {
+        let mut col = CollectionBuilder::default().build().unwrap();
+        let text = "# notetype: Basic (and reversed card)\n\n## Front\nhola\n\n## Back\nhello\n";
+
+        let rendered = render_notes(&mut col, text, None, &options()).unwrap();
+
+        let names: Vec<&str> = rendered.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["note1-card1", "note1-card2"]);
+        assert!(qa(&rendered[0].front).ends_with("</style>hola"));
+        assert!(qa(&rendered[1].front).ends_with("</style>hello"));
+        assert!(rendered[1].front.contains("<body class=\"card card2 "));
+        assert!(col.search_cards("", SortMode::NoOrder).unwrap().is_empty());
+    }
+
+    #[test]
+    fn renders_one_card_per_cloze_number() {
+        let mut col = CollectionBuilder::default().build().unwrap();
+        let text = "# notetype: Cloze\n\n## Text\n{{c1::a}} {{c3::b}}\n\n## Back Extra\n\n";
+
+        let rendered = render_notes(&mut col, text, None, &options()).unwrap();
+
+        let names: Vec<&str> = rendered.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["note1-card1", "note1-card3"]);
+        assert!(qa(&rendered[1].front).ends_with(
+            "<span class=\"cloze-inactive\" data-ordinal=\"1\">a</span> \
+                 <span class=\"cloze\" data-cloze=\"b\" data-ordinal=\"3\">[...]</span>"
+        ));
+        assert!(rendered[1].front.contains("<body class=\"card card3 "));
+    }
+
+    #[test]
+    fn later_blocks_inherit_the_first_blocks_notetype() {
+        let mut col = CollectionBuilder::default().build().unwrap();
+        let text = "# notetype: Basic\n\n## Front\none\n\n## Back\na\n\n---\n## Front\ntwo\n\n## Back\nb\n";
+
+        let rendered = render_notes(&mut col, text, None, &options()).unwrap();
+
+        let names: Vec<&str> = rendered.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["note1-card1", "note2-card1"]);
+        assert!(qa(&rendered[1].front).ends_with("</style>two"));
+    }
+
+    #[test]
+    fn a_block_with_a_nid_renders_the_edit_through_the_existing_card() {
+        let mut col = CollectionBuilder::default().build().unwrap();
+        let cards = add_basic(&mut col, "Basic", "old", "a");
+        let shown = crate::cards::show(&mut col, cards[0]).unwrap();
+        let nid = col
+            .storage
+            .get_card(CardId(cards[0]))
+            .unwrap()
+            .unwrap()
+            .note_id();
+        let text = format!("# nid: {}\n{}", nid.0, shown.replace("old", "new"));
+        let mut tmpl = (*col.get_notetype_by_name("Basic").unwrap().unwrap()).clone();
+        tmpl.templates[0].config.q_format = "{{Front}} {{CardID}}".into();
+        col.update_notetype(&mut tmpl, false).unwrap();
+
+        let rendered = render_notes(&mut col, &text, None, &options()).unwrap();
+
+        assert!(qa(&rendered[0].front).ends_with(&format!("</style>new {}", cards[0])));
+        let note = col.storage.get_note(nid).unwrap().unwrap();
+        assert_eq!(note.fields()[0], "old");
+    }
+
+    #[test]
+    fn rejects_fields_that_dont_match_the_notetype() {
+        let mut col = CollectionBuilder::default().build().unwrap();
+        let text = "# notetype: Basic\n\n## Fornt\nhola\n\n## Back\nhello\n";
+        let err = render_notes(&mut col, text, None, &options())
+            .err()
+            .unwrap();
+        assert!(format!("{err:#}").contains("don't match notetype"));
+
+        let err = render_notes(&mut col, "## Front\nq\n", None, &options())
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("no `# notetype:` header"));
+    }
+
+    #[test]
+    fn warns_about_a_card_with_an_empty_front() {
+        let mut col = CollectionBuilder::default().build().unwrap();
+        let text = "# notetype: Basic (optional reversed card)\n\n## Front\nq\n\n## Back\na\n\n## Add Reverse\n\n";
+
+        let rendered = render_notes(&mut col, text, None, &options()).unwrap();
+
+        assert!(rendered[0].warnings.is_empty());
+        assert_eq!(rendered[1].warnings.len(), 1);
+        assert!(rendered[1].warnings[0].contains("front is empty"));
     }
 
     #[test]
