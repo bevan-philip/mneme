@@ -289,3 +289,13 @@
   public `render_card`; `render_uncommitted_card` would re-fetch the
   stored notetype. Cards of any other notetype are an error, not rendered
   unedited.
+- `--night-mode` reproduces what desktop's dark theme changes for a card:
+  `nightMode night_mode` body classes (card CSS keys off them), the
+  webview's `night-mode` root class, and `vendor/anki/root-vars.css`,
+  Anki's CSS variables in both themes, which every page includes as
+  desktop's webviews do. That file is `ts/lib/sass/_root-vars.scss` from
+  the pinned anki rev compiled verbatim (`npx sass --no-source-map
+  ts/lib/sass/_root-vars.scss out.css` in an anki checkout, `sass` below
+  1.103 per anki's `package.json`); recompile it when bumping the pin.
+  Desktop's `macos-dark-mode` class is left out: it depends on the OS
+  theme, not Anki's.

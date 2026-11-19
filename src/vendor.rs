@@ -3,6 +3,11 @@ use std::path::Path;
 use anyhow::Context;
 use anyhow::Result;
 
+/// Anki's colour and size variables (`--canvas`, `--fg`, ...), light and
+/// `.night-mode`, which every desktop webview includes and card CSS can use:
+/// `ts/lib/sass/_root-vars.scss` at the pinned anki rev, compiled with sass.
+pub const ANKI_ROOT_VARS_CSS: &str = include_str!("../vendor/anki/root-vars.css");
+
 /// MathJax's entry point within `MATHJAX`, as pages load it.
 pub const MATHJAX_SCRIPT: &str = "tex-chtml-full.js";
 

@@ -209,6 +209,10 @@ pub enum CardsCommand {
         /// Directory to write the HTML files into, created if missing
         #[arg(long)]
         output_dir: PathBuf,
+        /// Render as desktop's dark theme shows cards: the `nightMode`
+        /// classes card CSS can style, and Anki's dark colours
+        #[arg(long)]
+        night_mode: bool,
     },
     /// Suspend cards, like Anki's browser
     Suspend(CardSelection),

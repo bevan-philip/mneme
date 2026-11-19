@@ -271,6 +271,7 @@ fn run_cards_command(
             input,
             templates,
             output_dir,
+            night_mode,
         } => {
             let templates = templates
                 .as_deref()
@@ -282,6 +283,7 @@ fn run_cards_command(
             let options = render::PageOptions {
                 media_dir: &media_dir,
                 mathjax_dir: &mathjax_dir,
+                night_mode,
             };
             let rendered = match input {
                 Some(path) => {

@@ -46,6 +46,8 @@ pub struct PageOptions<'a> {
     pub media_dir: &'a Path,
     /// Where `vendor::write_mathjax` puts MathJax for these pages.
     pub mathjax_dir: &'a Path,
+    /// Show the cards as desktop does with its dark theme.
+    pub night_mode: bool,
 }
 
 /// Render stored cards, through `templates` (a notetype with edited
@@ -311,13 +313,21 @@ fn preview_page(
     } else {
         "isLin"
     };
-    let class = format!("card card{} {platform} fancy", card_ord + 1);
+    // `theme_manager.body_classes_for_card_ord`, and the webview's
+    // `night-mode` class on the root, which switches Anki's CSS variables.
+    let (html_class, night_mode) = if options.night_mode {
+        ("night-mode", " nightMode night_mode")
+    } else {
+        ("", "")
+    };
+    let class = format!("card card{} {platform}{night_mode} fancy", card_ord + 1);
     let page = format!(
         "<!doctype html>\n\
-         <html>\n\
+         <html class=\"{html_class}\">\n\
          <head>\n\
          <meta charset=\"utf-8\">\n\
          <base href=\"{}\">\n\
+         <style>\n{}</style>\n\
          <style>\n{REVIEWER_CSS}</style>\n\
          {mathjax}\
          </head>\n\
@@ -325,7 +335,8 @@ fn preview_page(
          <div id=\"qa\" dir=\"auto\"><style>{css}</style>{text}</div>\n\
          </body>\n\
          </html>\n",
-        escape_attribute(&base)
+        escape_attribute(&base),
+        vendor::ANKI_ROOT_VARS_CSS,
     );
     (page, needs_mathjax)
 }
@@ -381,10 +392,12 @@ const MATHJAX_CONFIG: &str = r#"window.MathJax = {
 "#;
 
 /// The parts of desktop's reviewer stylesheet (`ts/reviewer/reviewer.scss`)
-/// that apply to card content in a light-mode preview.
+/// that apply to card content. `body.nightMode` is what overrides a stock
+/// `.card`'s black-on-white in night mode.
 const REVIEWER_CSS: &str = "\
 hr { background-color: #737373; margin: 1em 0; border: none; height: 1px; }
 body { margin: 20px; overflow-wrap: break-word; }
+body.nightMode { background-color: var(--canvas); color: var(--fg); }
 img { max-width: 100%; max-height: 95vh; }
 li { text-align: start; }
 pre { text-align: left; }
@@ -393,6 +406,8 @@ pre { text-align: left; }
 .replay-button svg circle { fill: #fff; stroke: #414141; }
 .replay-button svg path { fill: #414141; }
 .drawing { zoom: 50%; }
+.nightMode .latex { filter: invert(100%); }
+.nightMode img.drawing { filter: invert(1) hue-rotate(180deg); }
 ";
 
 #[cfg(test)]
@@ -406,6 +421,7 @@ mod tests {
         PageOptions {
             media_dir: Path::new("/m"),
             mathjax_dir: Path::new("/out/mathjax"),
+            night_mode: false,
         }
     }
 
@@ -591,6 +607,26 @@ mod tests {
             .err()
             .unwrap();
         assert!(err.to_string().contains("--templates is for `Basic`"));
+    }
+
+    #[test]
+    fn night_mode_sets_desktops_classes_and_dark_variables() {
+        let mut col = CollectionBuilder::default().build().unwrap();
+        let cards = add_basic(&mut col, "Basic", "q", "a");
+
+        let light = &render_cards(&mut col, &cards, None, &options()).unwrap()[0].front;
+        assert!(light.contains("<html class=\"\">"));
+        assert!(!light.contains("nightMode night_mode"));
+
+        let options = PageOptions {
+            night_mode: true,
+            ..options()
+        };
+        let night = &render_cards(&mut col, &cards, None, &options).unwrap()[0].front;
+        assert!(night.contains("<html class=\"night-mode\">"));
+        assert!(night.contains(" nightMode night_mode fancy\">"));
+        assert!(night.contains(":root.night-mode {"));
+        assert!(night.contains("body.nightMode { background-color: var(--canvas);"));
     }
 
     #[test]
